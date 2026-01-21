@@ -232,8 +232,11 @@ async function createChart(metric, data, participantId) {
             const ctx = chart.ctx;
             const xScale = chart.scales.x;
             const yScale = chart.scales.y;
+            const chartArea = chart.chartArea;
             
             ctx.save();
+            
+            console.log(`[${metric}] Drawing medications, chartArea:`, chartArea);
             
             // Group medications by unique med_id to show each medication separately
             const medicationGroups = {};
@@ -248,11 +251,13 @@ async function createChart(metric, data, participantId) {
                 medicationGroups[dose.medId].dates.push(dose.date);
             });
             
+            console.log(`[${metric}] Medication groups:`, medicationGroups);
+            
             // Draw all medication lines
             allMedicationDoses.forEach((dose) => {
                 const x = xScale.getPixelForValue(dose.date);
-                const yTop = yScale.top;
-                const yBottom = yScale.bottom;
+                const yTop = chartArea.top;
+                const yBottom = chartArea.bottom;
                 
                 // Draw vertical line with 20% opacity
                 ctx.strokeStyle = 'rgba(251, 191, 36, 0.2)';
@@ -264,7 +269,7 @@ async function createChart(metric, data, participantId) {
             });
             
             // Draw labels for each unique medication
-            let labelYOffset = -25;
+            let labelYOffset = 0;
             Object.values(medicationGroups).forEach((medGroup, groupIndex) => {
                 // Find the first date for this medication to position the label
                 const firstDate = medGroup.dates[0];
@@ -278,17 +283,19 @@ async function createChart(metric, data, participantId) {
                 const textWidth = ctx.measureText(labelText).width;
                 const padding = 6;
                 
+                const labelY = chartArea.top - 30 - labelYOffset;
+                
                 // Draw background box
                 ctx.fillStyle = 'rgba(251, 191, 36, 0.9)';
-                ctx.fillRect(x - textWidth/2 - padding, labelYOffset - 7, textWidth + padding * 2, 18);
+                ctx.fillRect(x - textWidth/2 - padding, labelY, textWidth + padding * 2, 18);
                 
                 // Draw text
                 ctx.fillStyle = '#78350f';
                 ctx.textAlign = 'center';
-                ctx.fillText(labelText, x, labelYOffset + 6);
+                ctx.fillText(labelText, x, labelY + 13);
                 
                 // Stack labels vertically if multiple medications
-                labelYOffset -= 22;
+                labelYOffset += 22;
             });
             
             ctx.restore();
