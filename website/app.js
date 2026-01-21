@@ -1,5 +1,5 @@
 // Initialize Supabase client
-const supabase = window.supabase.createClient(
+const supabaseClient = window.supabase.createClient(
     'https://tcagznodtcvlnhharmgj.supabase.co',
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRjYWd6bm9kdGN2bG5oaGFybWdqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg2NzUzODcsImV4cCI6MjA4NDI1MTM4N30.ki4vUdHmfW81E0F20uvcgH9oU3M7AcYwp0fD1s3gVfU'
 );
@@ -19,7 +19,7 @@ const METRICS = {
 async function loadParticipants() {
     console.log('Loading participants...');
     
-    const { data, error } = await supabase
+    const { data, error } = await supabaseClient
         .from('participants')
         .select('*')
         .order('id');
@@ -90,7 +90,7 @@ function closeDetail() {
 async function loadParticipantData(participantId) {
     console.log('Loading data for participant:', participantId);
     
-    const { data, error } = await supabase
+    const { data, error } = await supabaseClient
         .from('gait_metrics')
         .select('*')
         .eq('participant_id', participantId)
@@ -190,7 +190,7 @@ async function createChart(metric, data, participantId) {
     const worsens = METRICS[metric].worsens;
     const alertThreshold = worsens === 'increase' ? mean + 2 * std : mean - 2 * std;
 
-    const { data: meds } = await supabase
+    const { data: meds } = await supabaseClient
         .from('medications')
         .select('*')
         .eq('participant_id', participantId)
@@ -281,7 +281,7 @@ async function createChart(metric, data, participantId) {
 
 // Load medications for a participant
 async function loadMedications(participantId) {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseClient
         .from('medications')
         .select('*')
         .eq('participant_id', participantId)
@@ -327,7 +327,7 @@ function closeMedicationModal() {
 document.getElementById('medicationForm').addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    const { error } = await supabase
+    const { error } = await supabaseClient
         .from('medications')
         .insert([{
             participant_id: currentParticipant,
@@ -357,7 +357,7 @@ async function showTestData() {
     // Add test participants
     const participants = ['P001', 'P002', 'P003'];
     for (const pid of participants) {
-        const { error } = await supabase
+        const { error } = await supabaseClient
             .from('participants')
             .insert([{ id: pid }]);
         if (error) console.error('Error adding participant:', error);
@@ -371,7 +371,7 @@ async function showTestData() {
         const dateStr = date.toISOString().split('T')[0];
         
         for (const pid of participants) {
-            const { error } = await supabase
+            const { error } = await supabaseClient
                 .from('gait_metrics')
                 .insert([{
                     participant_id: pid,
