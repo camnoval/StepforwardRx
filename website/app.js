@@ -71,8 +71,9 @@ async function selectParticipant(participantId) {
     document.getElementById('detailTitle').textContent = `Participant ${participantId}`;
     document.getElementById('detailView').classList.add('active');
 
-    await loadParticipantData(participantId);
-    await loadMedications(participantId);
+    // Load medications FIRST, then load charts
+    await loadMedications(currentParticipant);
+    await loadParticipantData(currentParticipant);
 }
 
 // Close detail view
