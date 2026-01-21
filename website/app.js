@@ -4,11 +4,6 @@ const supabaseClient = window.supabase.createClient(
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRjYWd6bm9kdGN2bG5oaGFybWdqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg2NzUzODcsImV4cCI6MjA4NDI1MTM4N30.ki4vUdHmfW81E0F20uvcgH9oU3M7AcYwp0fD1s3gVfU'
 );
 
-// Check if annotation plugin is loaded
-console.log('Chart.js version:', Chart.version);
-console.log('Chart object:', Chart);
-console.log('Annotation plugin available:', typeof window.chartjsPluginAnnotation !== 'undefined');
-
 let currentParticipant = null;
 let chartInstances = {};
 let activeMedications = {}; // Track which medications are toggled on
@@ -202,11 +197,67 @@ async function createChart(metric, data, participantId) {
         .eq('participant_id', participantId)
         .order('start_date');
 
+    const activeMeds = meds?.filter(m => activeMedications[m.id]) || [];
+    
+    // Generate all medication dose dates
+    const allMedicationDoses = [];
+    activeMeds.forEach(med => {
+        const doses = generateDoseDates(med);
+        doses.forEach(dose => {
+            allMedicationDoses.push({
+                date: dose,
+                medication: med.medication_name,
+                color: 'rgba(251, 191, 36, 0.8)'
+            });
+        });
+    });
+
+    console.log('Medication doses to display:', allMedicationDoses);
+
     const ctx = document.getElementById(`chart-${metric}`).getContext('2d');
     
     if (chartInstances[metric]) {
         chartInstances[metric].destroy();
     }
+
+    // Custom plugin to draw medication lines
+    const medicationLinesPlugin = {
+        id: 'medicationLines',
+        afterDatasetsDraw: (chart) => {
+            const ctx = chart.ctx;
+            const xScale = chart.scales.x;
+            const yScale = chart.scales.y;
+            
+            ctx.save();
+            
+            allMedicationDoses.forEach((dose, index) => {
+                const x = xScale.getPixelForValue(dose.date);
+                const yTop = yScale.top;
+                const yBottom = yScale.bottom;
+                
+                // Draw vertical line
+                ctx.strokeStyle = dose.color;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(x, yTop);
+                ctx.lineTo(x, yBottom);
+                ctx.stroke();
+                
+                // Draw label on first occurrence of each medication
+                const isFirstOccurrence = allMedicationDoses.findIndex(d => d.medication === dose.medication) === index;
+                if (isFirstOccurrence) {
+                    ctx.fillStyle = 'rgba(251, 191, 36, 0.9)';
+                    ctx.fillRect(x - 40, yTop + 5, 80, 20);
+                    ctx.fillStyle = '#78350f';
+                    ctx.font = 'bold 10px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(dose.medication, x, yTop + 18);
+                }
+            });
+            
+            ctx.restore();
+        }
+    };
 
     chartInstances[metric] = new Chart(ctx, {
         type: 'line',
@@ -227,6 +278,15 @@ async function createChart(metric, data, participantId) {
                     borderColor: '#48bb78',
                     borderWidth: 2,
                     borderDash: [5, 5],
+                    pointRadius: 0,
+                    fill: false
+                },
+                {
+                    label: 'Alert Threshold',
+                    data: values.map(v => ({ x: v.x, y: alertThreshold })),
+                    borderColor: 'rgba(229, 62, 62, 0.5)',
+                    borderWidth: 2,
+                    borderDash: [10, 5],
                     pointRadius: 0,
                     fill: false
                 }
@@ -267,21 +327,22 @@ async function createChart(metric, data, participantId) {
                     callbacks: {
                         footer: function(tooltipItems) {
                             const date = new Date(tooltipItems[0].parsed.x);
-                            const activeMeds = meds?.filter(m => {
+                            const activeOnDate = activeMeds.filter(m => {
                                 const start = new Date(m.start_date);
                                 const end = m.end_date ? new Date(m.end_date) : new Date();
                                 return date >= start && date <= end;
-                            }) || [];
+                            });
                             
-                            if (activeMeds.length > 0) {
-                                return '\nActive Meds: ' + activeMeds.map(m => m.medication_name).join(', ');
+                            if (activeOnDate.length > 0) {
+                                return '\nActive Meds: ' + activeOnDate.map(m => m.medication_name).join(', ');
                             }
                             return '';
                         }
                     }
                 }
             }
-        }
+        },
+        plugins: [medicationLinesPlugin]
     });
 }
 
