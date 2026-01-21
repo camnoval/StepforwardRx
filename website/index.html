@@ -8,6 +8,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1"></script>
 </head>
 <body>
     <div class="header">
@@ -51,6 +52,17 @@
                 <div class="form-group">
                     <label>Dose *</label>
                     <input type="text" id="medDose" placeholder="e.g., 20mg" required>
+                </div>
+                <div class="form-group">
+                    <label>Frequency *</label>
+                    <select id="medFrequency" required>
+                        <option value="">Select frequency...</option>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="biweekly">Every 2 Weeks</option>
+                        <option value="monthly">Monthly</option>
+                        <option value="asneeded">As Needed</option>
+                    </select>
                 </div>
                 <div class="form-group">
                     <label>Start Date *</label>

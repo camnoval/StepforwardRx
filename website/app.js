@@ -6,6 +6,7 @@ const supabaseClient = window.supabase.createClient(
 
 let currentParticipant = null;
 let chartInstances = {};
+let activeMedications = {}; // Track which medications are toggled on
 
 const METRICS = {
     double_support_time: { label: 'Double Support Time', unit: 's', worsens: 'increase' },
@@ -298,18 +299,62 @@ async function loadMedications(participantId) {
         return;
     }
 
+    // Initialize all medications as active
+    data.forEach(med => {
+        if (activeMedications[med.id] === undefined) {
+            activeMedications[med.id] = true;
+        }
+    });
+
+    const frequencyLabels = {
+        daily: 'Daily',
+        weekly: 'Weekly',
+        biweekly: 'Every 2 Weeks',
+        monthly: 'Monthly',
+        asneeded: 'As Needed'
+    };
+
     const html = data.map(med => `
         <div class="medication-item">
-            <h4>${med.medication_name}</h4>
-            <div class="details">
-                Dose: ${med.dose} | 
-                Started: ${new Date(med.start_date).toLocaleDateString()} 
-                ${med.end_date ? `| Ended: ${new Date(med.end_date).toLocaleDateString()}` : '| Ongoing'}
+            <div class="medication-info">
+                <h4>${med.medication_name}</h4>
+                <div class="details">
+                    Dose: ${med.dose} | 
+                    Frequency: ${frequencyLabels[med.frequency] || med.frequency || 'Not specified'} | 
+                    Started: ${new Date(med.start_date).toLocaleDateString()} 
+                    ${med.end_date ? `| Ended: ${new Date(med.end_date).toLocaleDateString()}` : '| Ongoing'}
+                </div>
+            </div>
+            <div class="medication-toggle">
+                <span class="toggle-label">Show on chart</span>
+                <div class="toggle-switch ${activeMedications[med.id] ? 'active' : ''}" 
+                     onclick="toggleMedication(${med.id})"></div>
             </div>
         </div>
     `).join('');
 
     document.getElementById('medicationsList').innerHTML = html;
+}
+
+// Toggle medication visibility on charts
+async function toggleMedication(medId) {
+    activeMedications[medId] = !activeMedications[medId];
+    
+    // Update toggle UI
+    const toggles = document.querySelectorAll('.toggle-switch');
+    toggles.forEach(toggle => {
+        const medIdFromOnclick = toggle.getAttribute('onclick').match(/\d+/)[0];
+        if (parseInt(medIdFromOnclick) === medId) {
+            if (activeMedications[medId]) {
+                toggle.classList.add('active');
+            } else {
+                toggle.classList.remove('active');
+            }
+        }
+    });
+    
+    // Reload all charts to show/hide medication markers
+    await loadParticipantData(currentParticipant);
 }
 
 // Open medication modal
@@ -333,6 +378,7 @@ document.getElementById('medicationForm').addEventListener('submit', async (e) =
             participant_id: currentParticipant,
             medication_name: document.getElementById('medName').value,
             dose: document.getElementById('medDose').value,
+            frequency: document.getElementById('medFrequency').value,
             start_date: document.getElementById('medStartDate').value,
             end_date: document.getElementById('medEndDate').value || null
         }]);

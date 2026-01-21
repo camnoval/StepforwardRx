@@ -202,6 +202,13 @@ body {
     padding: 1rem;
     border-radius: 6px;
     border-left: 4px solid #667eea;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.medication-info {
+    flex: 1;
 }
 
 .medication-item h4 {
@@ -212,6 +219,48 @@ body {
 .medication-item .details {
     font-size: 0.85rem;
     color: #718096;
+}
+
+.medication-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.toggle-switch {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    background: #cbd5e0;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background 0.3s;
+}
+
+.toggle-switch.active {
+    background: #667eea;
+}
+
+.toggle-switch::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 20px;
+    height: 20px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.3s;
+}
+
+.toggle-switch.active::after {
+    transform: translateX(20px);
+}
+
+.toggle-label {
+    font-size: 0.85rem;
+    color: #718096;
+    user-select: none;
 }
 
 .modal {
@@ -270,7 +319,17 @@ body {
     font-size: 0.95rem;
 }
 
-.form-group input:focus {
+.form-group select {
+    width: 100%;
+    padding: 0.625rem;
+    border: 1px solid #cbd5e0;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    background: white;
+}
+
+.form-group input:focus,
+.form-group select:focus {
     outline: none;
     border-color: #667eea;
     box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
