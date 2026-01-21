@@ -346,6 +346,44 @@ async function createChart(metric, data, participantId) {
     });
 }
 
+// Generate dose dates based on medication frequency
+function generateDoseDates(medication) {
+    const start = new Date(medication.start_date);
+    const end = medication.end_date ? new Date(medication.end_date) : new Date();
+    const doses = [];
+    
+    let intervalDays;
+    switch(medication.frequency) {
+        case 'daily':
+            intervalDays = 1;
+            break;
+        case 'weekly':
+            intervalDays = 7;
+            break;
+        case 'biweekly':
+            intervalDays = 14;
+            break;
+        case 'monthly':
+            intervalDays = 30;
+            break;
+        case 'asneeded':
+            // For as-needed, just show start and end
+            doses.push(start);
+            if (medication.end_date) doses.push(end);
+            return doses;
+        default:
+            intervalDays = 1;
+    }
+    
+    let currentDate = new Date(start);
+    while (currentDate <= end) {
+        doses.push(new Date(currentDate));
+        currentDate.setDate(currentDate.getDate() + intervalDays);
+    }
+    
+    return doses;
+}
+
 // Load medications for a participant
 async function loadMedications(participantId) {
     const { data, error } = await supabaseClient
