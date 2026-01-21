@@ -296,7 +296,7 @@ async function createChart(metric, data, participantId) {
                     x = chartArea.left + labelWidth / 2;
                 }
                 
-                const labelY = chartArea.top - 35 - labelYOffset;
+                const labelY = chartArea.top - 10 - labelYOffset;
                 
                 // Draw background box
                 ctx.fillStyle = 'rgba(251, 191, 36, 0.9)';
@@ -353,7 +353,7 @@ async function createChart(metric, data, participantId) {
             maintainAspectRatio: false,
             layout: {
                 padding: {
-                    top: 80  // Add more padding at top for medication labels
+                    top: 30  // Just enough padding for medication labels
                 }
             },
             scales: {
@@ -380,9 +380,9 @@ async function createChart(metric, data, participantId) {
             plugins: {
                 legend: {
                     display: true,
-                    position: 'top',
+                    position: 'bottom',
                     labels: {
-                        padding: 15,
+                        padding: 10,
                         boxWidth: 40
                     }
                 },
