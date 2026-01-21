@@ -123,9 +123,10 @@ async function loadParticipantData(participantId) {
 
     document.getElementById('metricsContainer').innerHTML = metricsHtml;
 
-    Object.keys(METRICS).forEach(metric => {
-        createChart(metric, data, participantId);
-    });
+    // Create all charts sequentially to ensure proper rendering
+    for (const metric of Object.keys(METRICS)) {
+        await createChart(metric, data, participantId);
+    }
 }
 
 // Analyze metric for alerts
