@@ -325,10 +325,13 @@ async function loadMedications(participantId) {
                     ${med.end_date ? `| Ended: ${new Date(med.end_date).toLocaleDateString()}` : '| Ongoing'}
                 </div>
             </div>
-            <div class="medication-toggle">
-                <span class="toggle-label">Show on chart</span>
-                <div class="toggle-switch ${activeMedications[med.id] ? 'active' : ''}" 
-                     onclick="toggleMedication(${med.id})"></div>
+            <div class="medication-controls">
+                <div class="medication-toggle">
+                    <span class="toggle-label">Show</span>
+                    <div class="toggle-switch ${activeMedications[med.id] ? 'active' : ''}" 
+                         onclick="toggleMedication(${med.id})"></div>
+                </div>
+                <button class="btn-delete" onclick="deleteMedication(${med.id})">Delete</button>
             </div>
         </div>
     `).join('');
@@ -354,6 +357,31 @@ async function toggleMedication(medId) {
     });
     
     // Reload all charts to show/hide medication markers
+    await loadParticipantData(currentParticipant);
+}
+
+// Delete medication
+async function deleteMedication(medId) {
+    if (!confirm('Are you sure you want to delete this medication?')) {
+        return;
+    }
+    
+    const { error } = await supabaseClient
+        .from('medications')
+        .delete()
+        .eq('id', medId);
+    
+    if (error) {
+        alert('Error deleting medication: ' + error.message);
+        console.error('Medication delete error:', error);
+        return;
+    }
+    
+    // Remove from active medications tracking
+    delete activeMedications[medId];
+    
+    // Reload medications list and charts
+    await loadMedications(currentParticipant);
     await loadParticipantData(currentParticipant);
 }
 
