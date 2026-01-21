@@ -314,6 +314,7 @@ async function createChart(metric, data, participantId) {
                 while (overlaps) {
                     overlaps = false;
                     const labelY = chartArea.top - 10 - (row * 22);
+                    const labelBottom = labelY + 18;
                     
                     // Check if this position overlaps with existing labels on this row
                     for (const pos of labelPositions) {
@@ -327,8 +328,8 @@ async function createChart(metric, data, participantId) {
                         }
                     }
                     
-                    // Make sure label doesn't cover data points
-                    if (!overlaps && labelY + 18 > highestPoint - 5) {
+                    // Make sure label doesn't cover ANY part of the chart area
+                    if (!overlaps && labelBottom > chartArea.top) {
                         overlaps = true;
                         row++;
                     }
