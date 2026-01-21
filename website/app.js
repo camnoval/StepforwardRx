@@ -273,7 +273,7 @@ async function createChart(metric, data, participantId) {
             Object.values(medicationGroups).forEach((medGroup, groupIndex) => {
                 // Find the first date for this medication to position the label
                 const firstDate = medGroup.dates[0];
-                const x = xScale.getPixelForValue(firstDate);
+                let x = xScale.getPixelForValue(firstDate);
                 
                 // Create label text with dose
                 const labelText = `${medGroup.name} (${medGroup.doseAmount})`;
@@ -283,7 +283,20 @@ async function createChart(metric, data, participantId) {
                 const textWidth = ctx.measureText(labelText).width;
                 const padding = 6;
                 
-                const labelY = chartArea.top - 30 - labelYOffset;
+                // Check if label would be cut off on the right edge
+                const labelWidth = textWidth + padding * 2;
+                const labelRight = x + labelWidth / 2;
+                if (labelRight > chartArea.right) {
+                    x = chartArea.right - labelWidth / 2;
+                }
+                
+                // Check if label would be cut off on the left edge
+                const labelLeft = x - labelWidth / 2;
+                if (labelLeft < chartArea.left) {
+                    x = chartArea.left + labelWidth / 2;
+                }
+                
+                const labelY = chartArea.top - 10 - labelYOffset;
                 
                 // Draw background box
                 ctx.fillStyle = 'rgba(251, 191, 36, 0.9)';
@@ -340,7 +353,7 @@ async function createChart(metric, data, participantId) {
             maintainAspectRatio: false,
             layout: {
                 padding: {
-                    top: 50  // Add padding at top for medication labels
+                    top: 60  // Add padding at top for medication labels
                 }
             },
             scales: {
@@ -367,7 +380,11 @@ async function createChart(metric, data, participantId) {
             plugins: {
                 legend: {
                     display: true,
-                    position: 'top'
+                    position: 'top',
+                    labels: {
+                        padding: 15,
+                        boxWidth: 40
+                    }
                 },
                 tooltip: {
                     mode: 'index',
