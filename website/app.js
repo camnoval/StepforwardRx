@@ -6,7 +6,8 @@ const supabaseClient = window.supabase.createClient(
 
 // Check if annotation plugin is loaded
 console.log('Chart.js version:', Chart.version);
-console.log('Available plugins:', Chart.registry.plugins.keys());
+console.log('Chart object:', Chart);
+console.log('Annotation plugin available:', typeof window.chartjsPluginAnnotation !== 'undefined');
 
 let currentParticipant = null;
 let chartInstances = {};
