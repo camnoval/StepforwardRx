@@ -212,7 +212,8 @@ async function createChart(metric, data, participantId) {
         });
     });
 
-    console.log('Medication doses to display:', allMedicationDoses);
+    console.log(`[${metric}] Medication doses to display:`, allMedicationDoses);
+    console.log(`[${metric}] Active meds:`, activeMeds);
 
     const ctx = document.getElementById(`chart-${metric}`).getContext('2d');
     
