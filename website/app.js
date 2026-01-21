@@ -201,7 +201,7 @@ async function createChart(metric, data, participantId) {
 
     const activeMeds = meds?.filter(m => activeMedications[m.id]) || [];
     
-    // Generate all medication dose dates
+    // Generate all medication dose dates with full med info
     const allMedicationDoses = [];
     activeMeds.forEach(med => {
         const doses = generateDoseDates(med);
@@ -209,6 +209,8 @@ async function createChart(metric, data, participantId) {
             allMedicationDoses.push({
                 date: dose,
                 medication: med.medication_name,
+                dose: med.dose,
+                medId: med.id,
                 color: 'rgba(251, 191, 36, 0.8)'
             });
         });
@@ -233,7 +235,21 @@ async function createChart(metric, data, participantId) {
             
             ctx.save();
             
-            allMedicationDoses.forEach((dose, index) => {
+            // Group medications by unique med_id to show each medication separately
+            const medicationGroups = {};
+            allMedicationDoses.forEach(dose => {
+                if (!medicationGroups[dose.medId]) {
+                    medicationGroups[dose.medId] = {
+                        name: dose.medication,
+                        doseAmount: dose.dose,
+                        dates: []
+                    };
+                }
+                medicationGroups[dose.medId].dates.push(dose.date);
+            });
+            
+            // Draw all medication lines
+            allMedicationDoses.forEach((dose) => {
                 const x = xScale.getPixelForValue(dose.date);
                 const yTop = yScale.top;
                 const yBottom = yScale.bottom;
@@ -245,24 +261,34 @@ async function createChart(metric, data, participantId) {
                 ctx.moveTo(x, yTop);
                 ctx.lineTo(x, yBottom);
                 ctx.stroke();
+            });
+            
+            // Draw labels for each unique medication
+            let labelYOffset = -25;
+            Object.values(medicationGroups).forEach((medGroup, groupIndex) => {
+                // Find the first date for this medication to position the label
+                const firstDate = medGroup.dates[0];
+                const x = xScale.getPixelForValue(firstDate);
                 
-                // Draw label on first occurrence of each medication at the top
-                const isFirstOccurrence = allMedicationDoses.findIndex(d => d.medication === dose.medication) === index;
-                if (isFirstOccurrence) {
-                    // Measure text width for proper background sizing
-                    ctx.font = 'bold 10px sans-serif';
-                    const textWidth = ctx.measureText(dose.medication).width;
-                    const padding = 6;
-                    
-                    // Draw background box
-                    ctx.fillStyle = 'rgba(251, 191, 36, 0.9)';
-                    ctx.fillRect(x - textWidth/2 - padding, yTop - 25, textWidth + padding * 2, 18);
-                    
-                    // Draw text
-                    ctx.fillStyle = '#78350f';
-                    ctx.textAlign = 'center';
-                    ctx.fillText(dose.medication, x, yTop - 12);
-                }
+                // Create label text with dose
+                const labelText = `${medGroup.name} (${medGroup.doseAmount})`;
+                
+                // Measure text width for proper background sizing
+                ctx.font = 'bold 10px sans-serif';
+                const textWidth = ctx.measureText(labelText).width;
+                const padding = 6;
+                
+                // Draw background box
+                ctx.fillStyle = 'rgba(251, 191, 36, 0.9)';
+                ctx.fillRect(x - textWidth/2 - padding, labelYOffset - 7, textWidth + padding * 2, 18);
+                
+                // Draw text
+                ctx.fillStyle = '#78350f';
+                ctx.textAlign = 'center';
+                ctx.fillText(labelText, x, labelYOffset + 6);
+                
+                // Stack labels vertically if multiple medications
+                labelYOffset -= 22;
             });
             
             ctx.restore();
@@ -305,6 +331,11 @@ async function createChart(metric, data, participantId) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            layout: {
+                padding: {
+                    top: 50  // Add padding at top for medication labels
+                }
+            },
             scales: {
                 x: {
                     type: 'time',
