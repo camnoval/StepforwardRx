@@ -235,23 +235,30 @@ async function createChart(metric, data, participantId) {
                 const yTop = yScale.top;
                 const yBottom = yScale.bottom;
                 
-                // Draw vertical line
-                ctx.strokeStyle = dose.color;
+                // Draw vertical line with 20% opacity
+                ctx.strokeStyle = 'rgba(251, 191, 36, 0.2)';
                 ctx.lineWidth = 3;
                 ctx.beginPath();
                 ctx.moveTo(x, yTop);
                 ctx.lineTo(x, yBottom);
                 ctx.stroke();
                 
-                // Draw label on first occurrence of each medication
+                // Draw label on first occurrence of each medication at the top
                 const isFirstOccurrence = allMedicationDoses.findIndex(d => d.medication === dose.medication) === index;
                 if (isFirstOccurrence) {
-                    ctx.fillStyle = 'rgba(251, 191, 36, 0.9)';
-                    ctx.fillRect(x - 40, yTop + 5, 80, 20);
-                    ctx.fillStyle = '#78350f';
+                    // Measure text width for proper background sizing
                     ctx.font = 'bold 10px sans-serif';
+                    const textWidth = ctx.measureText(dose.medication).width;
+                    const padding = 6;
+                    
+                    // Draw background box
+                    ctx.fillStyle = 'rgba(251, 191, 36, 0.9)';
+                    ctx.fillRect(x - textWidth/2 - padding, yTop - 25, textWidth + padding * 2, 18);
+                    
+                    // Draw text
+                    ctx.fillStyle = '#78350f';
                     ctx.textAlign = 'center';
-                    ctx.fillText(dose.medication, x, yTop + 18);
+                    ctx.fillText(dose.medication, x, yTop - 12);
                 }
             });
             
