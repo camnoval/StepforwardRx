@@ -269,7 +269,8 @@ async function createChart(metric, data, participantId) {
             });
             
             // Draw labels for each unique medication
-            let labelYOffset = 0;
+            const labelPositions = [];
+            
             Object.values(medicationGroups).forEach((medGroup, groupIndex) => {
                 // Find the first date for this medication to position the label
                 const firstDate = medGroup.dates[0];
@@ -282,9 +283,9 @@ async function createChart(metric, data, participantId) {
                 ctx.font = 'bold 10px sans-serif';
                 const textWidth = ctx.measureText(labelText).width;
                 const padding = 6;
+                const labelWidth = textWidth + padding * 2;
                 
                 // Check if label would be cut off on the right edge
-                const labelWidth = textWidth + padding * 2;
                 const labelRight = x + labelWidth / 2;
                 if (labelRight > chartArea.right) {
                     x = chartArea.right - labelWidth / 2;
@@ -296,7 +297,47 @@ async function createChart(metric, data, participantId) {
                     x = chartArea.left + labelWidth / 2;
                 }
                 
-                const labelY = chartArea.top - 10 - labelYOffset;
+                // Find the highest Y value (data point) near this X position to avoid covering it
+                const nearbyPoints = values.filter(v => {
+                    const pointX = xScale.getPixelForValue(v.x);
+                    return Math.abs(pointX - x) < labelWidth / 2 + 10; // 10px buffer
+                });
+                
+                const highestPoint = nearbyPoints.length > 0 
+                    ? Math.min(...nearbyPoints.map(p => yScale.getPixelForValue(p.y)))
+                    : chartArea.top;
+                
+                // Determine which row this label should be on
+                let row = 0;
+                let overlaps = true;
+                
+                while (overlaps) {
+                    overlaps = false;
+                    const labelY = chartArea.top - 10 - (row * 22);
+                    
+                    // Check if this position overlaps with existing labels on this row
+                    for (const pos of labelPositions) {
+                        if (pos.row === row) {
+                            const horizontalOverlap = Math.abs(pos.x - x) < (labelWidth / 2 + pos.width / 2 + 5);
+                            if (horizontalOverlap) {
+                                overlaps = true;
+                                row++;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Make sure label doesn't cover data points
+                    if (!overlaps && labelY + 18 > highestPoint - 5) {
+                        overlaps = true;
+                        row++;
+                    }
+                }
+                
+                const labelY = chartArea.top - 10 - (row * 22);
+                
+                // Store this label's position
+                labelPositions.push({ x, row, width: labelWidth });
                 
                 // Draw background box
                 ctx.fillStyle = 'rgba(251, 191, 36, 0.9)';
@@ -306,9 +347,6 @@ async function createChart(metric, data, participantId) {
                 ctx.fillStyle = '#78350f';
                 ctx.textAlign = 'center';
                 ctx.fillText(labelText, x, labelY + 13);
-                
-                // Stack labels vertically if multiple medications
-                labelYOffset += 22;
             });
             
             ctx.restore();
