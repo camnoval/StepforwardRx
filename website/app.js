@@ -4,6 +4,10 @@ const supabaseClient = window.supabase.createClient(
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRjYWd6bm9kdGN2bG5oaGFybWdqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg2NzUzODcsImV4cCI6MjA4NDI1MTM4N30.ki4vUdHmfW81E0F20uvcgH9oU3M7AcYwp0fD1s3gVfU'
 );
 
+// Check if annotation plugin is loaded
+console.log('Chart.js version:', Chart.version);
+console.log('Available plugins:', Chart.registry.plugins.keys());
+
 let currentParticipant = null;
 let chartInstances = {};
 let activeMedications = {}; // Track which medications are toggled on
