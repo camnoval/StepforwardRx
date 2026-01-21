@@ -366,10 +366,14 @@ async function deleteMedication(medId) {
         return;
     }
     
-    const { error } = await supabaseClient
+    console.log('Attempting to delete medication ID:', medId);
+    
+    const { data, error } = await supabaseClient
         .from('medications')
         .delete()
         .eq('id', medId);
+    
+    console.log('Delete response:', { data, error });
     
     if (error) {
         alert('Error deleting medication: ' + error.message);
@@ -379,6 +383,8 @@ async function deleteMedication(medId) {
     
     // Remove from active medications tracking
     delete activeMedications[medId];
+    
+    console.log('Medication deleted successfully, reloading...');
     
     // Reload medications list and charts
     await loadMedications(currentParticipant);
