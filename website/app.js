@@ -1,47 +1,4 @@
-async function handleLogin() {
-    clearMessages();
-    const email = document.getElementById('loginEmail').value.trim().toLowerCase();
-    const pw    = document.getElementById('loginPassword').value;
-    if (!email || !pw) { showError('Please fill in all fields.'); return; }
-
-    const btn = document.getElementById('loginBtn');
-    setAuthLoading(btn, true, 'Sign In');
-
-    try {
-        // Look up researcher by email
-        const { data, error } = await sb.from('researchers')
-            .select('*')
-            .eq('email', email);
-
-        if (error) throw new Error(error.message);
-        if (!data || data.length === 0) {
-            showError('No account found with that email.');
-            setAuthLoading(btn, false, 'Sign In');
-            return;
-        }
-
-        const user = data[0];
-        const passwordMatch = await checkPassword(pw, user.password);
-
-        if (!passwordMatch) {
-            showError('Incorrect password.');
-            setAuthLoading(btn, false, 'Sign In');
-            return;
-        }
-
-        // Success — save session and load dashboard
-        researcher = user;
-        localStorage.setItem('sf_researcher_id', user.id);
-        localStorage.setItem('sf_researcher_email', user.email);
-        showLoadingOverlay();
-        await loadDashboard();
-
-    } catch (err) {
-        showError('Login failed: ' + err.message);
-    } finally {
-        setAuthLoading(btn, false, 'Sign In');
-    }
-}// ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
 // StepForward Rx — Researcher Dashboard
 // ═══════════════════════════════════════════════════════
 
@@ -78,6 +35,7 @@ const METRICS = [
     { key: 'double_support_time',  label: 'Double Support Time',  unit: '%',   color: '#e53e3e', worsens: 'increase' },
     { key: 'walking_steadiness',   label: 'Walking Steadiness',   unit: '',    color: '#805ad5', worsens: 'decrease' },
 ];
+
 
 // ═════════════════════════════════════════════════════
 // AUTH
@@ -145,47 +103,66 @@ function setAuthLoading(btn, loading, defaultText) {
 // Enter key support
 document.addEventListener('keydown', function(e) {
     if (e.key !== 'Enter') return;
-    if (document.getElementById('loginForm').style.display !== 'none' &&
-        document.getElementById('authScreen').style.display !== 'none') {
+    const authScreen = document.getElementById('authScreen');
+    if (authScreen.style.display === 'none') return;
+    if (document.getElementById('loginForm').style.display !== 'none') {
         handleLogin();
-    } else if (document.getElementById('signupForm').style.display !== 'none' &&
-               document.getElementById('authScreen').style.display !== 'none') {
+    } else if (document.getElementById('signupForm').style.display !== 'none') {
         handleSignup();
     }
 });
 
 async function handleLogin() {
     clearMessages();
-    const email = document.getElementById('loginEmail').value.trim();
+    const email = document.getElementById('loginEmail').value.trim().toLowerCase();
     const pw    = document.getElementById('loginPassword').value;
     if (!email || !pw) { showError('Please fill in all fields.'); return; }
 
     const btn = document.getElementById('loginBtn');
     setAuthLoading(btn, true, 'Sign In');
 
-    const { data, error } = await sb.auth.signInWithPassword({ email, password: pw });
+    try {
+        const { data, error } = await sb.from('researchers')
+            .select('*')
+            .eq('email', email);
 
-    if (error) {
-        showError(error.message);
+        if (error) throw new Error(error.message);
+        if (!data || data.length === 0) {
+            showError('No account found with that email.');
+            setAuthLoading(btn, false, 'Sign In');
+            return;
+        }
+
+        const user = data[0];
+        const passwordMatch = await checkPassword(pw, user.password);
+
+        if (!passwordMatch) {
+            showError('Incorrect password.');
+            setAuthLoading(btn, false, 'Sign In');
+            return;
+        }
+
+        researcher = user;
+        localStorage.setItem('sf_researcher_id', user.id);
+        localStorage.setItem('sf_researcher_email', user.email);
+        showLoadingOverlay();
+        await loadDashboard();
+
+    } catch (err) {
+        showError('Login failed: ' + err.message);
+    } finally {
         setAuthLoading(btn, false, 'Sign In');
-        return;
     }
-
-    session = data.session;
-    showLoadingOverlay();
-    await loadDashboard();
-    setAuthLoading(btn, false, 'Sign In');
 }
 
 async function handleSignup() {
     clearMessages();
     const name    = document.getElementById('signupName').value.trim();
-    const email   = document.getElementById('signupEmail').value.trim();
+    const creds   = document.getElementById('signupCredentials').value.trim();
+    const email   = document.getElementById('signupEmail').value.trim().toLowerCase();
     const pw      = document.getElementById('signupPassword').value;
     const pharmId = document.getElementById('signupPharmacy').value;
-
-    const creds = document.getElementById('signupCredentials').value.trim();
-    const agreed = document.getElementById('signupAgree').checked;
+    const agreed  = document.getElementById('signupAgree').checked;
 
     if (!name || !email || !pw || !pharmId) {
         showError('Please fill in all required fields.');
@@ -203,51 +180,52 @@ async function handleSignup() {
     const btn = document.getElementById('signupBtn');
     setAuthLoading(btn, true, 'Create Account');
 
-    // 1) Create auth account
-    const { data: authData, error: authErr } = await sb.auth.signUp({ email, password: pw });
-    if (authErr) {
-        showError(authErr.message);
-        setAuthLoading(btn, false, 'Create Account');
-        return;
-    }
+    try {
+        // Check if email already exists
+        const { data: existing } = await sb.from('researchers')
+            .select('id')
+            .eq('email', email);
 
-    const userId = authData.user?.id;
-    if (!userId) {
-        showError('Signup failed — no user ID returned.');
-        setAuthLoading(btn, false, 'Create Account');
-        return;
-    }
+        if (existing && existing.length > 0) {
+            showError('An account with this email already exists. Please sign in.');
+            setAuthLoading(btn, false, 'Create Account');
+            return;
+        }
 
-    if (authData.session) session = authData.session;
+        const hashedPw = await hashPassword(pw);
+        const fullName = creds ? `${name}, ${creds}` : name;
+        const newId    = crypto.randomUUID();
 
-    // 2) Insert researcher record
-    const fullName = creds ? `${name}, ${creds}` : name;
-    const { error: resErr } = await sb.from('researchers').insert({ id: userId, email, name: fullName });
-    if (resErr) {
-        showError('Account created but failed to save researcher profile: ' + resErr.message);
-        setAuthLoading(btn, false, 'Create Account');
-        return;
-    }
+        // Insert researcher
+        const { error: resErr } = await sb.from('researchers').insert({
+            id: newId,
+            email: email,
+            name: fullName,
+            password: hashedPw
+        });
 
-    // 3) Link to pharmacy
-    const { error: linkErr } = await sb.from('researcher_pharmacy_access').insert({
-        researcher_id: userId,
-        pharmacy_id: pharmId
-    });
-    if (linkErr) {
-        showError('Account created but pharmacy link failed: ' + linkErr.message);
-        setAuthLoading(btn, false, 'Create Account');
-        return;
-    }
+        if (resErr) throw new Error('Failed to create account: ' + resErr.message);
 
-    if (session) {
+        // Link to pharmacy
+        const { error: linkErr } = await sb.from('researcher_pharmacy_access').insert({
+            researcher_id: newId,
+            pharmacy_id: pharmId
+        });
+
+        if (linkErr) throw new Error('Account created but pharmacy link failed: ' + linkErr.message);
+
+        // Auto-login
+        researcher = { id: newId, email, name: fullName };
+        localStorage.setItem('sf_researcher_id', newId);
+        localStorage.setItem('sf_researcher_email', email);
         showLoadingOverlay();
         await loadDashboard();
-    } else {
-        showSuccess('Account created! Check your email to confirm, then sign in.');
-        showLogin();
+
+    } catch (err) {
+        showError(err.message);
+    } finally {
+        setAuthLoading(btn, false, 'Create Account');
     }
-    setAuthLoading(btn, false, 'Create Account');
 }
 
 function handleLogout() {
@@ -266,6 +244,7 @@ function handleLogout() {
     showLogin();
 }
 
+
 // ═════════════════════════════════════════════════════
 // LOADING OVERLAY
 // ═════════════════════════════════════════════════════
@@ -277,6 +256,7 @@ function showLoadingOverlay() {
 function hideLoadingOverlay() {
     document.getElementById('loadingOverlay').style.display = 'none';
 }
+
 
 // ═════════════════════════════════════════════════════
 // DASHBOARD LOADER
@@ -290,6 +270,7 @@ async function loadDashboard() {
         const { data: access } = await sb.from('researcher_pharmacy_access')
             .select('pharmacy_id')
             .eq('researcher_id', userId);
+
         const pharmIds = (access || []).map(a => a.pharmacy_id);
 
         if (pharmIds.length === 0) {
@@ -319,23 +300,20 @@ async function loadDashboard() {
             pharmacy_state: pharmacyMap[p.pharmacy_id]?.state || '',
         }));
 
-        // Update UI
+        // Show dashboard
         document.getElementById('authScreen').style.display  = 'none';
         document.getElementById('dashboardScreen').style.display = 'block';
         hideLoadingOverlay();
 
-        // Header user info
         const displayName = researcher.name || researcher.email;
         document.getElementById('researcherName').textContent = displayName;
         document.getElementById('userAvatar').textContent = getInitials(displayName);
 
-        // Summary cards
         document.getElementById('statParticipants').textContent = participantsList.length;
         document.getElementById('statPharmacies').textContent   = Object.keys(pharmacyMap).length;
         document.getElementById('statNames').textContent =
             Object.values(pharmacyMap).map(p => p.name).join(', ') || '—';
 
-        // Table
         renderTable(participantsList);
         document.getElementById('tableFooter').textContent =
             `Showing ${participantsList.length} participant${participantsList.length !== 1 ? 's' : ''}`;
@@ -349,6 +327,7 @@ async function loadDashboard() {
         localStorage.removeItem('sf_researcher_email');
     }
 }
+
 
 // ═════════════════════════════════════════════════════
 // PARTICIPANT TABLE
@@ -392,6 +371,7 @@ function filterTable() {
         `Showing ${filtered.length} of ${participantsList.length} participants`;
 }
 
+
 // ═════════════════════════════════════════════════════
 // DETAIL VIEW
 // ═════════════════════════════════════════════════════
@@ -400,7 +380,6 @@ async function selectParticipant(pid) {
     currentParticipant = participantsList.find(p => p.id === pid);
     if (!currentParticipant) return;
 
-    // Switch views
     document.getElementById('listView').style.display = 'none';
     document.getElementById('detailView').classList.add('active');
     document.getElementById('detailTitle').textContent      = currentParticipant.id;
@@ -409,7 +388,6 @@ async function selectParticipant(pid) {
     document.getElementById('filterTo').value   = '';
     document.getElementById('clearFilterBtn').style.display = 'none';
 
-    // Show loading states
     document.getElementById('metricsGrid').innerHTML =
         '<div style="grid-column:1/-1;text-align:center;padding:60px;color:#9ca3af">Loading metrics…</div>';
     document.getElementById('sideEffectsContent').innerHTML =
@@ -418,7 +396,6 @@ async function selectParticipant(pid) {
         '<div class="empty-state">Loading…</div>';
     document.getElementById('snapshotRow').innerHTML = '';
 
-    // Fetch all data in parallel
     const [metricsRes, seRes, medRes] = await Promise.all([
         sb.from('gait_metrics').select('*').eq('participant_id', pid).order('date', { ascending: true }),
         sb.from('side_effects').select('*').eq('participant_id', pid).order('reported_at', { ascending: false }).limit(50),
@@ -470,6 +447,7 @@ function getFilteredMetrics() {
     return d;
 }
 
+
 // ═════════════════════════════════════════════════════
 // SNAPSHOTS (latest values)
 // ═════════════════════════════════════════════════════
@@ -512,6 +490,7 @@ function buildSnapshots() {
             </div>`;
     }).join('');
 }
+
 
 // ═════════════════════════════════════════════════════
 // CHARTS
@@ -595,11 +574,11 @@ function createChart(metric, data) {
     const sd   = Math.sqrt(rawY.reduce((a, v) => a + (v - mean) ** 2, 0) / (rawY.length - 1 || 1));
     const threshold = metric.worsens === 'increase' ? mean + 2 * sd : mean - 2 * sd;
 
-    // Build medication annotation lines for active meds
+    // Medication annotation lines
     const medAnnotations = [];
     currentMedications.forEach(med => {
         const start = new Date(med.start_date);
-        if (start >= vals[0].x && start <= vals[vals.length - 1].x) {
+        if (vals.length > 0 && start >= vals[0].x && start <= vals[vals.length - 1].x) {
             medAnnotations.push({
                 x: start,
                 label: med.medication_name + ' (' + (med.dose || '') + ')'
@@ -607,7 +586,6 @@ function createChart(metric, data) {
         }
     });
 
-    // Medication lines plugin
     const medPlugin = {
         id: 'medLines_' + metric.key,
         afterDatasetsDraw: (chart) => {
@@ -621,7 +599,6 @@ function createChart(metric, data) {
                 const x = xScale.getPixelForValue(ann.x);
                 if (x < area.left || x > area.right) return;
 
-                // Vertical line
                 ctx.strokeStyle = 'rgba(251, 191, 36, 0.25)';
                 ctx.lineWidth   = 2;
                 ctx.setLineDash([]);
@@ -630,7 +607,6 @@ function createChart(metric, data) {
                 ctx.lineTo(x, area.bottom);
                 ctx.stroke();
 
-                // Label
                 ctx.font      = 'bold 9px sans-serif';
                 ctx.fillStyle = 'rgba(251, 191, 36, 0.9)';
                 const tw = ctx.measureText(ann.label).width;
@@ -747,6 +723,7 @@ function createChart(metric, data) {
     });
 }
 
+
 // ═════════════════════════════════════════════════════
 // SIDE EFFECTS
 // ═════════════════════════════════════════════════════
@@ -771,6 +748,7 @@ function renderSideEffects() {
             </tbody>
         </table>`;
 }
+
 
 // ═════════════════════════════════════════════════════
 // MEDICATIONS
@@ -811,6 +789,7 @@ function renderMedications() {
             </tbody>
         </table>`;
 }
+
 
 // ═════════════════════════════════════════════════════
 // CSV EXPORT
@@ -877,6 +856,7 @@ function downloadCSV(csv, filename) {
     URL.revokeObjectURL(a.href);
 }
 
+
 // ═════════════════════════════════════════════════════
 // UTILITIES
 // ═════════════════════════════════════════════════════
@@ -907,6 +887,7 @@ function getInitials(name) {
     return name.substring(0, 2).toUpperCase();
 }
 
+
 // ═════════════════════════════════════════════════════
 // INIT — Check for saved session in localStorage
 // ═════════════════════════════════════════════════════
@@ -916,7 +897,6 @@ function getInitials(name) {
     const savedEmail = localStorage.getItem('sf_researcher_email');
 
     if (savedId && savedEmail) {
-        // Verify the researcher still exists in the database
         const { data } = await sb.from('researchers').select('*').eq('id', savedId);
 
         if (data && data.length > 0) {
@@ -924,7 +904,6 @@ function getInitials(name) {
             showLoadingOverlay();
             await loadDashboard();
         } else {
-            // Stale session — clear it
             localStorage.removeItem('sf_researcher_id');
             localStorage.removeItem('sf_researcher_email');
         }
