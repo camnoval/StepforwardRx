@@ -1,4 +1,47 @@
-// ═══════════════════════════════════════════════════════
+async function handleLogin() {
+    clearMessages();
+    const email = document.getElementById('loginEmail').value.trim().toLowerCase();
+    const pw    = document.getElementById('loginPassword').value;
+    if (!email || !pw) { showError('Please fill in all fields.'); return; }
+
+    const btn = document.getElementById('loginBtn');
+    setAuthLoading(btn, true, 'Sign In');
+
+    try {
+        // Look up researcher by email
+        const { data, error } = await sb.from('researchers')
+            .select('*')
+            .eq('email', email);
+
+        if (error) throw new Error(error.message);
+        if (!data || data.length === 0) {
+            showError('No account found with that email.');
+            setAuthLoading(btn, false, 'Sign In');
+            return;
+        }
+
+        const user = data[0];
+        const passwordMatch = await checkPassword(pw, user.password);
+
+        if (!passwordMatch) {
+            showError('Incorrect password.');
+            setAuthLoading(btn, false, 'Sign In');
+            return;
+        }
+
+        // Success — save session and load dashboard
+        researcher = user;
+        localStorage.setItem('sf_researcher_id', user.id);
+        localStorage.setItem('sf_researcher_email', user.email);
+        showLoadingOverlay();
+        await loadDashboard();
+
+    } catch (err) {
+        showError('Login failed: ' + err.message);
+    } finally {
+        setAuthLoading(btn, false, 'Sign In');
+    }
+}// ═══════════════════════════════════════════════════════
 // StepForward Rx — Researcher Dashboard
 // ═══════════════════════════════════════════════════════
 
@@ -8,7 +51,6 @@ const SB_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsIn
 const sb = window.supabase.createClient(SB_URL, SB_KEY);
 
 // ─── State ──────────────────────────────────────────
-let session          = null;
 let researcher       = null;
 let pharmacyMap      = {};
 let participantsList = [];
@@ -17,6 +59,16 @@ let currentMetrics      = [];
 let currentSideEffects  = [];
 let currentMedications  = [];
 let chartInstances      = {};
+
+// ─── Password hashing (bcrypt) ──────────────────────
+async function hashPassword(password) {
+    const salt = await dcodeIO.bcrypt.genSalt(10);
+    return await dcodeIO.bcrypt.hash(password, salt);
+}
+
+async function checkPassword(password, hash) {
+    return await dcodeIO.bcrypt.compare(password, hash);
+}
 
 // ─── Metric definitions ─────────────────────────────
 const METRICS = [
@@ -199,13 +251,13 @@ async function handleSignup() {
 }
 
 function handleLogout() {
-    sb.auth.signOut();
-    session = null;
     researcher = null;
     pharmacyMap = {};
     participantsList = [];
     currentParticipant = null;
     destroyAllCharts();
+    localStorage.removeItem('sf_researcher_id');
+    localStorage.removeItem('sf_researcher_email');
 
     document.getElementById('dashboardScreen').style.display = 'none';
     document.getElementById('authScreen').style.display = 'flex';
@@ -231,19 +283,9 @@ function hideLoadingOverlay() {
 // ═════════════════════════════════════════════════════
 
 async function loadDashboard() {
-    const userId = session.user.id;
+    const userId = researcher.id;
 
     try {
-        // Get researcher record
-        const { data: res } = await sb.from('researchers').select('*').eq('id', userId);
-        if (!res || res.length === 0) {
-            hideLoadingOverlay();
-            showError('Your account is not registered as a researcher. Please sign up first.');
-            session = null;
-            return;
-        }
-        researcher = res[0];
-
         // Get pharmacy access
         const { data: access } = await sb.from('researcher_pharmacy_access')
             .select('pharmacy_id')
@@ -253,7 +295,9 @@ async function loadDashboard() {
         if (pharmIds.length === 0) {
             hideLoadingOverlay();
             showError('No pharmacy access assigned to your account. Contact your administrator.');
-            session = null;
+            researcher = null;
+            localStorage.removeItem('sf_researcher_id');
+            localStorage.removeItem('sf_researcher_email');
             return;
         }
 
@@ -300,7 +344,9 @@ async function loadDashboard() {
         hideLoadingOverlay();
         showError('Failed to load dashboard: ' + err.message);
         console.error(err);
-        session = null;
+        researcher = null;
+        localStorage.removeItem('sf_researcher_id');
+        localStorage.removeItem('sf_researcher_email');
     }
 }
 
@@ -862,14 +908,25 @@ function getInitials(name) {
 }
 
 // ═════════════════════════════════════════════════════
-// INIT — Check for existing session
+// INIT — Check for saved session in localStorage
 // ═════════════════════════════════════════════════════
 
 (async () => {
-    const { data: { session: existing } } = await sb.auth.getSession();
-    if (existing) {
-        session = existing;
-        showLoadingOverlay();
-        await loadDashboard();
+    const savedId    = localStorage.getItem('sf_researcher_id');
+    const savedEmail = localStorage.getItem('sf_researcher_email');
+
+    if (savedId && savedEmail) {
+        // Verify the researcher still exists in the database
+        const { data } = await sb.from('researchers').select('*').eq('id', savedId);
+
+        if (data && data.length > 0) {
+            researcher = data[0];
+            showLoadingOverlay();
+            await loadDashboard();
+        } else {
+            // Stale session — clear it
+            localStorage.removeItem('sf_researcher_id');
+            localStorage.removeItem('sf_researcher_email');
+        }
     }
 })();
