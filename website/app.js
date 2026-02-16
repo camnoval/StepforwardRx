@@ -132,12 +132,19 @@ async function handleSignup() {
     const pw      = document.getElementById('signupPassword').value;
     const pharmId = document.getElementById('signupPharmacy').value;
 
+    const creds = document.getElementById('signupCredentials').value.trim();
+    const agreed = document.getElementById('signupAgree').checked;
+
     if (!name || !email || !pw || !pharmId) {
-        showError('Please fill in all fields.');
+        showError('Please fill in all required fields.');
         return;
     }
     if (pw.length < 6) {
         showError('Password must be at least 6 characters.');
+        return;
+    }
+    if (!agreed) {
+        showError('Please agree to the data handling policy to continue.');
         return;
     }
 
@@ -162,7 +169,8 @@ async function handleSignup() {
     if (authData.session) session = authData.session;
 
     // 2) Insert researcher record
-    const { error: resErr } = await sb.from('researchers').insert({ id: userId, email, name });
+    const fullName = creds ? `${name}, ${creds}` : name;
+    const { error: resErr } = await sb.from('researchers').insert({ id: userId, email, name: fullName });
     if (resErr) {
         showError('Account created but failed to save researcher profile: ' + resErr.message);
         setAuthLoading(btn, false, 'Create Account');
