@@ -3,79 +3,233 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>StepForward Rx - MS Mobility Monitoring Dashboard</title>
+    <title>StepForward Rx — Researcher Dashboard</title>
     <link rel="stylesheet" href="styles.css">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 </head>
 <body>
-    <div class="header">
-        <h1>StepForward Rx Dashboard</h1>
-        <p>MS Mobility Monitoring Study - Real-time Gait Analysis</p>
-    </div>
 
-    <div class="container">
-        <div id="participantsList" class="participants-grid">
-            <div class="loading">Loading participants...</div>
-        </div>
-
-        <div id="detailView" class="detail-view">
-            <div class="detail-header">
-                <h2 id="detailTitle">Participant Details</h2>
-                <button class="btn btn-secondary" onclick="closeDetail()">Back to List</button>
+    <!-- ═══════════ AUTH SCREEN ═══════════ -->
+    <div id="authScreen" class="auth-wrap">
+        <div class="auth-card">
+            <div class="auth-brand">
+                <div class="auth-logo">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#667eea" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                    </svg>
+                </div>
+                <h1>StepForward Rx</h1>
+                <p class="auth-subtitle">Researcher Portal</p>
             </div>
 
-            <div id="metricsContainer" class="metrics-grid"></div>
+            <div id="authError" class="auth-msg auth-error" style="display:none"></div>
+            <div id="authSuccess" class="auth-msg auth-success" style="display:none"></div>
 
-            <div class="medications-section">
-                <div class="medications-header">
-                    <h3>Medication Timeline</h3>
-                    <button class="btn btn-primary" onclick="openMedicationModal()">+ Add Medication</button>
+            <!-- Login -->
+            <div id="loginForm">
+                <div class="form-group">
+                    <label for="loginEmail">Email</label>
+                    <input type="email" id="loginEmail" placeholder="you@institution.edu" autocomplete="email">
                 </div>
-                <div id="medicationsList" class="medications-list"></div>
+                <div class="form-group">
+                    <label for="loginPassword">Password</label>
+                    <input type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password">
+                </div>
+                <button class="btn-auth" id="loginBtn" onclick="handleLogin()">
+                    <span class="btn-text">Sign In</span>
+                    <span class="btn-spinner" style="display:none"></span>
+                </button>
+                <div class="auth-toggle">
+                    Don't have an account? <button onclick="showSignup()">Sign up</button>
+                </div>
             </div>
-        </div>
-    </div>
 
-    <div id="medicationModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Add Medication</h3>
-            </div>
-            <form id="medicationForm">
+            <!-- Signup -->
+            <div id="signupForm" style="display:none">
                 <div class="form-group">
-                    <label>Medication Name *</label>
-                    <input type="text" id="medName" required>
+                    <label for="signupName">Full Name</label>
+                    <input type="text" id="signupName" placeholder="Dr. Jane Smith" autocomplete="name">
                 </div>
                 <div class="form-group">
-                    <label>Dose *</label>
-                    <input type="text" id="medDose" placeholder="e.g., 20mg" required>
+                    <label for="signupEmail">Email</label>
+                    <input type="email" id="signupEmail" placeholder="you@institution.edu" autocomplete="email">
                 </div>
                 <div class="form-group">
-                    <label>Frequency *</label>
-                    <select id="medFrequency" required>
-                        <option value="">Select frequency...</option>
-                        <option value="daily">Daily</option>
-                        <option value="weekly">Weekly</option>
-                        <option value="biweekly">Every 2 Weeks</option>
-                        <option value="monthly">Monthly</option>
-                        <option value="asneeded">As Needed</option>
+                    <label for="signupPassword">Password</label>
+                    <input type="password" id="signupPassword" placeholder="Minimum 6 characters" autocomplete="new-password">
+                </div>
+                <div class="form-group">
+                    <label for="signupPharmacy">Your Pharmacy</label>
+                    <select id="signupPharmacy">
+                        <option value="" disabled selected>Loading pharmacies…</option>
                     </select>
                 </div>
-                <div class="form-group">
-                    <label>Start Date *</label>
-                    <input type="date" id="medStartDate" required>
+                <button class="btn-auth" id="signupBtn" onclick="handleSignup()">
+                    <span class="btn-text">Create Account</span>
+                    <span class="btn-spinner" style="display:none"></span>
+                </button>
+                <div class="auth-toggle">
+                    Already have an account? <button onclick="showLogin()">Sign in</button>
                 </div>
-                <div class="form-group">
-                    <label>End Date (optional)</label>
-                    <input type="date" id="medEndDate">
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════ LOADING OVERLAY ═══════════ -->
+    <div id="loadingOverlay" class="loading-overlay" style="display:none">
+        <div class="loading-card">
+            <div class="spinner-lg"></div>
+            <p>Loading your dashboard…</p>
+        </div>
+    </div>
+
+    <!-- ═══════════ DASHBOARD ═══════════ -->
+    <div id="dashboardScreen" style="display:none">
+
+        <!-- Header -->
+        <div class="header">
+            <div class="header-left">
+                <svg class="header-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                </svg>
+                <h1>StepForward Rx</h1>
+                <span class="header-sep">Researcher Dashboard</span>
+            </div>
+            <div class="header-right">
+                <div class="user-badge" id="userBadge">
+                    <span class="user-avatar" id="userAvatar"></span>
+                    <span class="user-name" id="researcherName"></span>
                 </div>
-                <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="closeMedicationModal()">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Add Medication</button>
+                <button class="btn-signout" onclick="handleLogout()">Sign out</button>
+            </div>
+        </div>
+
+        <div class="container">
+
+            <!-- ─── LIST VIEW ─── -->
+            <div id="listView">
+                <!-- Summary Cards -->
+                <div class="summary-row">
+                    <div class="summary-card">
+                        <div class="summary-icon blue">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                        </div>
+                        <div>
+                            <div class="summary-label">Participants</div>
+                            <div class="summary-value" id="statParticipants">0</div>
+                        </div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-icon green">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                        </div>
+                        <div>
+                            <div class="summary-label">Pharmacies</div>
+                            <div class="summary-value" id="statPharmacies">0</div>
+                        </div>
+                    </div>
+                    <div class="summary-card wide">
+                        <div class="summary-icon purple">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                        </div>
+                        <div>
+                            <div class="summary-label">Your Access</div>
+                            <div class="summary-value small" id="statNames">—</div>
+                        </div>
+                    </div>
                 </div>
-            </form>
+
+                <!-- Toolbar -->
+                <div class="toolbar">
+                    <div class="search-wrap">
+                        <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                        <input type="text" id="searchInput" placeholder="Search by participant ID or pharmacy…" oninput="filterTable()">
+                    </div>
+                    <div class="toolbar-actions">
+                        <button class="btn btn-primary" onclick="exportAllCSV()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Export All to CSV
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Table -->
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Participant ID</th>
+                                <th>Pharmacy</th>
+                                <th>Location</th>
+                                <th style="width:60px"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="participantsBody">
+                            <tr><td colspan="4" class="empty-row">Loading…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="table-footer" id="tableFooter"></div>
+            </div>
+
+            <!-- ─── DETAIL VIEW ─── -->
+            <div id="detailView">
+                <div class="detail-topbar">
+                    <button class="btn btn-back" onclick="backToList()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                        Back
+                    </button>
+                    <div class="detail-info">
+                        <h2 id="detailTitle"></h2>
+                        <span class="detail-pharmacy" id="detailPharmacy"></span>
+                    </div>
+                    <div class="detail-actions">
+                        <div class="date-filters">
+                            <label>From</label>
+                            <input type="date" id="filterFrom" onchange="reloadCharts()">
+                            <label>To</label>
+                            <input type="date" id="filterTo" onchange="reloadCharts()">
+                            <button class="btn-clear" id="clearFilterBtn" onclick="clearDateFilters()" style="display:none">Clear</button>
+                        </div>
+                        <button class="btn btn-secondary" onclick="exportParticipantCSV()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Export CSV
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Metrics snapshot -->
+                <div class="snapshot-row" id="snapshotRow"></div>
+
+                <!-- Charts -->
+                <div class="metrics-grid" id="metricsGrid"></div>
+
+                <!-- Side Effects -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Side Effect Reports</h3>
+                        <span class="badge" id="seCount">0</span>
+                    </div>
+                    <div id="sideEffectsContent">
+                        <div class="empty-state">Loading…</div>
+                    </div>
+                </div>
+
+                <!-- Medications -->
+                <div class="card" style="margin-top:20px">
+                    <div class="card-header">
+                        <h3>Medications</h3>
+                        <span class="badge" id="medCount">0</span>
+                    </div>
+                    <div id="medicationsContent">
+                        <div class="empty-state">Loading…</div>
+                    </div>
+                </div>
+            </div>
+
         </div>
     </div>
 

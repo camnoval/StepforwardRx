@@ -1,682 +1,867 @@
-// Initialize Supabase client
-const supabaseClient = window.supabase.createClient(
-    'https://tcagznodtcvlnhharmgj.supabase.co',
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRjYWd6bm9kdGN2bG5oaGFybWdqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg2NzUzODcsImV4cCI6MjA4NDI1MTM4N30.ki4vUdHmfW81E0F20uvcgH9oU3M7AcYwp0fD1s3gVfU'
-);
+// ═══════════════════════════════════════════════════════
+// StepForward Rx — Researcher Dashboard
+// ═══════════════════════════════════════════════════════
 
-let currentParticipant = null;
-let chartInstances = {};
-let activeMedications = {}; // Track which medications are toggled on
+const SB_URL  = 'https://tcagznodtcvlnhharmgj.supabase.co';
+const SB_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRjYWd6bm9kdGN2bG5oaGFybWdqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg2NzUzODcsImV4cCI6MjA4NDI1MTM4N30.ki4vUdHmfW81E0F20uvcgH9oU3M7AcYwp0fD1s3gVfU';
 
-const METRICS = {
-    double_support_time: { label: 'Double Support Time', unit: 's', worsens: 'increase' },
-    walking_asymmetry: { label: 'Walking Asymmetry', unit: '%', worsens: 'increase' },
-    walking_speed: { label: 'Walking Speed', unit: 'm/s', worsens: 'decrease' },
-    walking_step_length: { label: 'Step Length', unit: 'm', worsens: 'decrease' },
-    walking_steadiness: { label: 'Walking Steadiness', unit: '%', worsens: 'decrease' }
-};
+const sb = window.supabase.createClient(SB_URL, SB_KEY);
 
-// Load all participants
-async function loadParticipants() {
-    console.log('Loading participants...');
-    
-    const { data, error } = await supabaseClient
-        .from('participants')
-        .select('*')
-        .order('id');
+// ─── State ──────────────────────────────────────────
+let session          = null;
+let researcher       = null;
+let pharmacyMap      = {};
+let participantsList = [];
+let currentParticipant  = null;
+let currentMetrics      = [];
+let currentSideEffects  = [];
+let currentMedications  = [];
+let chartInstances      = {};
 
-    console.log('Supabase response:', { data, error });
+// ─── Metric definitions ─────────────────────────────
+const METRICS = [
+    { key: 'walking_speed',        label: 'Walking Speed',        unit: 'm/s', color: '#667eea', worsens: 'decrease' },
+    { key: 'walking_step_length',  label: 'Step Length',           unit: 'm',   color: '#38a169', worsens: 'decrease' },
+    { key: 'walking_asymmetry',    label: 'Walking Asymmetry',    unit: '%',   color: '#d69e2e', worsens: 'increase' },
+    { key: 'double_support_time',  label: 'Double Support Time',  unit: '%',   color: '#e53e3e', worsens: 'increase' },
+    { key: 'walking_steadiness',   label: 'Walking Steadiness',   unit: '',    color: '#805ad5', worsens: 'decrease' },
+];
+
+// ═════════════════════════════════════════════════════
+// AUTH
+// ═════════════════════════════════════════════════════
+
+function showError(msg) {
+    const el = document.getElementById('authError');
+    el.textContent = msg;
+    el.style.display = 'block';
+    document.getElementById('authSuccess').style.display = 'none';
+}
+
+function showSuccess(msg) {
+    const el = document.getElementById('authSuccess');
+    el.textContent = msg;
+    el.style.display = 'block';
+    document.getElementById('authError').style.display = 'none';
+}
+
+function clearMessages() {
+    document.getElementById('authError').style.display = 'none';
+    document.getElementById('authSuccess').style.display = 'none';
+}
+
+function showLogin() {
+    clearMessages();
+    document.getElementById('loginForm').style.display = 'block';
+    document.getElementById('signupForm').style.display = 'none';
+}
+
+function showSignup() {
+    clearMessages();
+    document.getElementById('loginForm').style.display = 'none';
+    document.getElementById('signupForm').style.display = 'block';
+    loadPharmacyDropdown();
+}
+
+async function loadPharmacyDropdown() {
+    const sel = document.getElementById('signupPharmacy');
+    sel.innerHTML = '<option value="" disabled selected>Loading…</option>';
+
+    const { data, error } = await sb.from('pharmacies').select('*').order('name');
+
+    if (error || !data || data.length === 0) {
+        sel.innerHTML = '<option value="" disabled selected>No pharmacies found</option>';
+        return;
+    }
+
+    sel.innerHTML = '<option value="" disabled selected>Select a pharmacy…</option>' +
+        data.map(p => {
+            const loc = [p.city, p.state].filter(Boolean).join(', ');
+            return `<option value="${p.id}">${p.name}${loc ? ' — ' + loc : ''}</option>`;
+        }).join('');
+}
+
+function setAuthLoading(btn, loading, defaultText) {
+    const textEl    = btn.querySelector('.btn-text');
+    const spinnerEl = btn.querySelector('.btn-spinner');
+    btn.disabled           = loading;
+    textEl.textContent     = loading ? '' : defaultText;
+    textEl.style.display   = loading ? 'none' : 'inline';
+    spinnerEl.style.display = loading ? 'inline-block' : 'none';
+}
+
+// Enter key support
+document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Enter') return;
+    if (document.getElementById('loginForm').style.display !== 'none' &&
+        document.getElementById('authScreen').style.display !== 'none') {
+        handleLogin();
+    } else if (document.getElementById('signupForm').style.display !== 'none' &&
+               document.getElementById('authScreen').style.display !== 'none') {
+        handleSignup();
+    }
+});
+
+async function handleLogin() {
+    clearMessages();
+    const email = document.getElementById('loginEmail').value.trim();
+    const pw    = document.getElementById('loginPassword').value;
+    if (!email || !pw) { showError('Please fill in all fields.'); return; }
+
+    const btn = document.getElementById('loginBtn');
+    setAuthLoading(btn, true, 'Sign In');
+
+    const { data, error } = await sb.auth.signInWithPassword({ email, password: pw });
 
     if (error) {
-        console.error('Error loading participants:', error);
-        document.getElementById('participantsList').innerHTML = 
-            `<div class="empty-state">
-                <h3>⚠️ Database Error</h3>
-                <p>${error.message}</p>
-                <p style="font-size: 0.85rem; margin-top: 1rem;">Check the browser console (F12) for details</p>
-            </div>`;
+        showError(error.message);
+        setAuthLoading(btn, false, 'Sign In');
         return;
     }
 
-    if (!data || data.length === 0) {
-        document.getElementById('participantsList').innerHTML = 
-            `<div class="empty-state">
-                <h3>No participants found</h3>
-                <p>The 'participants' table exists but is empty.</p>
-                <p style="font-size: 0.85rem; margin-top: 1rem;">Add participants to your Supabase database to get started.</p>
-                <button class="btn btn-primary" onclick="showTestData()" style="margin-top: 1rem;">Add Test Data</button>
-            </div>`;
+    session = data.session;
+    showLoadingOverlay();
+    await loadDashboard();
+    setAuthLoading(btn, false, 'Sign In');
+}
+
+async function handleSignup() {
+    clearMessages();
+    const name    = document.getElementById('signupName').value.trim();
+    const email   = document.getElementById('signupEmail').value.trim();
+    const pw      = document.getElementById('signupPassword').value;
+    const pharmId = document.getElementById('signupPharmacy').value;
+
+    if (!name || !email || !pw || !pharmId) {
+        showError('Please fill in all fields.');
+        return;
+    }
+    if (pw.length < 6) {
+        showError('Password must be at least 6 characters.');
         return;
     }
 
-    const html = data.map(p => `
-        <div class="participant-card" onclick="selectParticipant('${p.id}')">
-            <h3>Participant ${p.id}</h3>
-            <div class="stats">Click to view details</div>
-        </div>
-    `).join('');
+    const btn = document.getElementById('signupBtn');
+    setAuthLoading(btn, true, 'Create Account');
 
-    document.getElementById('participantsList').innerHTML = html;
+    // 1) Create auth account
+    const { data: authData, error: authErr } = await sb.auth.signUp({ email, password: pw });
+    if (authErr) {
+        showError(authErr.message);
+        setAuthLoading(btn, false, 'Create Account');
+        return;
+    }
+
+    const userId = authData.user?.id;
+    if (!userId) {
+        showError('Signup failed — no user ID returned.');
+        setAuthLoading(btn, false, 'Create Account');
+        return;
+    }
+
+    if (authData.session) session = authData.session;
+
+    // 2) Insert researcher record
+    const { error: resErr } = await sb.from('researchers').insert({ id: userId, email, name });
+    if (resErr) {
+        showError('Account created but failed to save researcher profile: ' + resErr.message);
+        setAuthLoading(btn, false, 'Create Account');
+        return;
+    }
+
+    // 3) Link to pharmacy
+    const { error: linkErr } = await sb.from('researcher_pharmacy_access').insert({
+        researcher_id: userId,
+        pharmacy_id: pharmId
+    });
+    if (linkErr) {
+        showError('Account created but pharmacy link failed: ' + linkErr.message);
+        setAuthLoading(btn, false, 'Create Account');
+        return;
+    }
+
+    if (session) {
+        showLoadingOverlay();
+        await loadDashboard();
+    } else {
+        showSuccess('Account created! Check your email to confirm, then sign in.');
+        showLogin();
+    }
+    setAuthLoading(btn, false, 'Create Account');
 }
 
-// Select a participant to view details
-async function selectParticipant(participantId) {
-    currentParticipant = participantId;
-    
-    document.querySelectorAll('.participant-card').forEach(card => {
-        card.classList.remove('active');
-    });
-    event.target.closest('.participant-card').classList.add('active');
-
-    document.getElementById('detailTitle').textContent = `Participant ${participantId}`;
-    document.getElementById('detailView').classList.add('active');
-
-    // Load medications FIRST, then load charts
-    await loadMedications(currentParticipant);
-    await loadParticipantData(currentParticipant);
-}
-
-// Close detail view
-function closeDetail() {
-    document.getElementById('detailView').classList.remove('active');
-    document.querySelectorAll('.participant-card').forEach(card => {
-        card.classList.remove('active');
-    });
+function handleLogout() {
+    sb.auth.signOut();
+    session = null;
+    researcher = null;
+    pharmacyMap = {};
+    participantsList = [];
     currentParticipant = null;
-    
-    Object.values(chartInstances).forEach(chart => chart.destroy());
+    destroyAllCharts();
+
+    document.getElementById('dashboardScreen').style.display = 'none';
+    document.getElementById('authScreen').style.display = 'flex';
+    document.getElementById('loginEmail').value = '';
+    document.getElementById('loginPassword').value = '';
+    showLogin();
+}
+
+// ═════════════════════════════════════════════════════
+// LOADING OVERLAY
+// ═════════════════════════════════════════════════════
+
+function showLoadingOverlay() {
+    document.getElementById('loadingOverlay').style.display = 'flex';
+}
+
+function hideLoadingOverlay() {
+    document.getElementById('loadingOverlay').style.display = 'none';
+}
+
+// ═════════════════════════════════════════════════════
+// DASHBOARD LOADER
+// ═════════════════════════════════════════════════════
+
+async function loadDashboard() {
+    const userId = session.user.id;
+
+    try {
+        // Get researcher record
+        const { data: res } = await sb.from('researchers').select('*').eq('id', userId);
+        if (!res || res.length === 0) {
+            hideLoadingOverlay();
+            showError('Your account is not registered as a researcher. Please sign up first.');
+            session = null;
+            return;
+        }
+        researcher = res[0];
+
+        // Get pharmacy access
+        const { data: access } = await sb.from('researcher_pharmacy_access')
+            .select('pharmacy_id')
+            .eq('researcher_id', userId);
+        const pharmIds = (access || []).map(a => a.pharmacy_id);
+
+        if (pharmIds.length === 0) {
+            hideLoadingOverlay();
+            showError('No pharmacy access assigned to your account. Contact your administrator.');
+            session = null;
+            return;
+        }
+
+        // Get pharmacies
+        const { data: pharms } = await sb.from('pharmacies').select('*').in('id', pharmIds);
+        pharmacyMap = {};
+        (pharms || []).forEach(p => pharmacyMap[p.id] = p);
+
+        // Get participants
+        const { data: parts } = await sb.from('participants')
+            .select('*')
+            .in('pharmacy_id', pharmIds)
+            .order('id');
+
+        participantsList = (parts || []).map(p => ({
+            ...p,
+            pharmacy_name:  pharmacyMap[p.pharmacy_id]?.name  || p.pharmacy_id,
+            pharmacy_city:  pharmacyMap[p.pharmacy_id]?.city  || '',
+            pharmacy_state: pharmacyMap[p.pharmacy_id]?.state || '',
+        }));
+
+        // Update UI
+        document.getElementById('authScreen').style.display  = 'none';
+        document.getElementById('dashboardScreen').style.display = 'block';
+        hideLoadingOverlay();
+
+        // Header user info
+        const displayName = researcher.name || researcher.email;
+        document.getElementById('researcherName').textContent = displayName;
+        document.getElementById('userAvatar').textContent = getInitials(displayName);
+
+        // Summary cards
+        document.getElementById('statParticipants').textContent = participantsList.length;
+        document.getElementById('statPharmacies').textContent   = Object.keys(pharmacyMap).length;
+        document.getElementById('statNames').textContent =
+            Object.values(pharmacyMap).map(p => p.name).join(', ') || '—';
+
+        // Table
+        renderTable(participantsList);
+        document.getElementById('tableFooter').textContent =
+            `Showing ${participantsList.length} participant${participantsList.length !== 1 ? 's' : ''}`;
+
+    } catch (err) {
+        hideLoadingOverlay();
+        showError('Failed to load dashboard: ' + err.message);
+        console.error(err);
+        session = null;
+    }
+}
+
+// ═════════════════════════════════════════════════════
+// PARTICIPANT TABLE
+// ═════════════════════════════════════════════════════
+
+function renderTable(list) {
+    const tbody = document.getElementById('participantsBody');
+
+    if (list.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="empty-row">No participants found</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = list.map(p => {
+        const loc = [p.pharmacy_city, p.pharmacy_state].filter(Boolean).join(', ') || '—';
+        return `
+            <tr onclick="selectParticipant('${escAttr(p.id)}')">
+                <td class="pid">${escHtml(p.id)}</td>
+                <td>${escHtml(p.pharmacy_name)}</td>
+                <td style="color:#6b7280">${escHtml(loc)}</td>
+                <td class="view-link">View →</td>
+            </tr>`;
+    }).join('');
+}
+
+function filterTable() {
+    const q = document.getElementById('searchInput').value.toLowerCase().trim();
+    if (!q) {
+        renderTable(participantsList);
+        document.getElementById('tableFooter').textContent =
+            `Showing ${participantsList.length} participant${participantsList.length !== 1 ? 's' : ''}`;
+        return;
+    }
+    const filtered = participantsList.filter(p =>
+        p.id.toLowerCase().includes(q) ||
+        (p.pharmacy_name || '').toLowerCase().includes(q) ||
+        (p.pharmacy_city || '').toLowerCase().includes(q)
+    );
+    renderTable(filtered);
+    document.getElementById('tableFooter').textContent =
+        `Showing ${filtered.length} of ${participantsList.length} participants`;
+}
+
+// ═════════════════════════════════════════════════════
+// DETAIL VIEW
+// ═════════════════════════════════════════════════════
+
+async function selectParticipant(pid) {
+    currentParticipant = participantsList.find(p => p.id === pid);
+    if (!currentParticipant) return;
+
+    // Switch views
+    document.getElementById('listView').style.display = 'none';
+    document.getElementById('detailView').classList.add('active');
+    document.getElementById('detailTitle').textContent      = currentParticipant.id;
+    document.getElementById('detailPharmacy').textContent    = currentParticipant.pharmacy_name;
+    document.getElementById('filterFrom').value = '';
+    document.getElementById('filterTo').value   = '';
+    document.getElementById('clearFilterBtn').style.display = 'none';
+
+    // Show loading states
+    document.getElementById('metricsGrid').innerHTML =
+        '<div style="grid-column:1/-1;text-align:center;padding:60px;color:#9ca3af">Loading metrics…</div>';
+    document.getElementById('sideEffectsContent').innerHTML =
+        '<div class="empty-state">Loading…</div>';
+    document.getElementById('medicationsContent').innerHTML =
+        '<div class="empty-state">Loading…</div>';
+    document.getElementById('snapshotRow').innerHTML = '';
+
+    // Fetch all data in parallel
+    const [metricsRes, seRes, medRes] = await Promise.all([
+        sb.from('gait_metrics').select('*').eq('participant_id', pid).order('date', { ascending: true }),
+        sb.from('side_effects').select('*').eq('participant_id', pid).order('reported_at', { ascending: false }).limit(50),
+        sb.from('medications').select('*').eq('participant_id', pid).order('start_date', { ascending: false }),
+    ]);
+
+    currentMetrics     = metricsRes.data  || [];
+    currentSideEffects = seRes.data        || [];
+    currentMedications = medRes.data       || [];
+
+    buildSnapshots();
+    buildCharts();
+    renderSideEffects();
+    renderMedications();
+}
+
+function backToList() {
+    document.getElementById('detailView').classList.remove('active');
+    document.getElementById('listView').style.display = 'block';
+    destroyAllCharts();
+    currentParticipant = null;
+    currentMetrics     = [];
+    currentSideEffects = [];
+    currentMedications = [];
+}
+
+function clearDateFilters() {
+    document.getElementById('filterFrom').value = '';
+    document.getElementById('filterTo').value   = '';
+    document.getElementById('clearFilterBtn').style.display = 'none';
+    buildCharts();
+    buildSnapshots();
+}
+
+function reloadCharts() {
+    const f = document.getElementById('filterFrom').value;
+    const t = document.getElementById('filterTo').value;
+    document.getElementById('clearFilterBtn').style.display = (f || t) ? 'inline-flex' : 'none';
+    buildCharts();
+    buildSnapshots();
+}
+
+function getFilteredMetrics() {
+    let d = [...currentMetrics];
+    const f = document.getElementById('filterFrom').value;
+    const t = document.getElementById('filterTo').value;
+    if (f) d = d.filter(r => r.date >= f);
+    if (t) d = d.filter(r => r.date <= t);
+    return d;
+}
+
+// ═════════════════════════════════════════════════════
+// SNAPSHOTS (latest values)
+// ═════════════════════════════════════════════════════
+
+function buildSnapshots() {
+    const data = getFilteredMetrics();
+    const row  = document.getElementById('snapshotRow');
+
+    if (data.length === 0) {
+        row.innerHTML = '';
+        return;
+    }
+
+    row.innerHTML = METRICS.map(m => {
+        const vals = data.filter(d => d[m.key] != null);
+        if (vals.length === 0) return `
+            <div class="snapshot-card">
+                <div class="snap-label">${m.label}</div>
+                <div class="snap-value" style="color:#d1d5db">—</div>
+            </div>`;
+
+        const latest   = vals[vals.length - 1][m.key];
+        const prev     = vals.length > 1 ? vals[vals.length - 2][m.key] : null;
+        let changeHtml = '';
+
+        if (prev != null) {
+            const diff    = latest - prev;
+            const pct     = prev !== 0 ? ((diff / Math.abs(prev)) * 100).toFixed(1) : '0.0';
+            const isWorse = (m.worsens === 'increase' && diff > 0) || (m.worsens === 'decrease' && diff < 0);
+            const cls     = Math.abs(diff) < 0.001 ? 'neutral' : (isWorse ? 'up' : 'down');
+            const arrow   = diff > 0 ? '↑' : diff < 0 ? '↓' : '—';
+            changeHtml    = `<div class="snap-change ${cls}">${arrow} ${Math.abs(pct)}%</div>`;
+        }
+
+        return `
+            <div class="snapshot-card">
+                <div class="snap-label">${m.label}</div>
+                <div class="snap-value">${latest.toFixed(3)}</div>
+                ${changeHtml}
+            </div>`;
+    }).join('');
+}
+
+// ═════════════════════════════════════════════════════
+// CHARTS
+// ═════════════════════════════════════════════════════
+
+function destroyAllCharts() {
+    Object.values(chartInstances).forEach(c => c.destroy());
     chartInstances = {};
 }
 
-// Load participant gait metrics
-async function loadParticipantData(participantId) {
-    console.log('Loading data for participant:', participantId);
-    
-    const { data, error } = await supabaseClient
-        .from('gait_metrics')
-        .select('*')
-        .eq('participant_id', participantId)
-        .order('date');
+function buildCharts() {
+    destroyAllCharts();
+    const grid = document.getElementById('metricsGrid');
+    const data = getFilteredMetrics();
 
-    console.log('Gait metrics response:', { data, error });
+    grid.innerHTML = METRICS.map(m => {
+        const alertStatus = analyzeMetric(data, m);
+        const badgeHtml   = alertStatus.status === 'warning'
+            ? '<span class="alert-badge warning">⚠ Alert</span>'
+            : '<span class="alert-badge normal">✓ Normal</span>';
 
-    if (error) {
-        console.error('Error loading metrics:', error);
-        return;
-    }
-
-    const metricsHtml = Object.keys(METRICS).map(metric => {
-        const alertStatus = analyzeMetric(data, metric);
         return `
             <div class="metric-card">
                 <div class="metric-header">
-                    <h3>${METRICS[metric].label}</h3>
-                    <span class="alert-badge ${alertStatus.status}">
-                        ${alertStatus.status === 'warning' ? '⚠️ Alert' : '✓ Normal'}
-                    </span>
+                    <h3>${m.label}</h3>
+                    <div style="display:flex;align-items:center;gap:8px">
+                        ${badgeHtml}
+                        <span class="metric-unit">${m.unit}</span>
+                    </div>
                 </div>
-                <div class="chart-container">
-                    <canvas id="chart-${metric}"></canvas>
-                </div>
-            </div>
-        `;
+                <div class="chart-box"><canvas id="chart-${m.key}"></canvas></div>
+            </div>`;
     }).join('');
 
-    document.getElementById('metricsContainer').innerHTML = metricsHtml;
-
-    // Create all charts sequentially to ensure proper rendering
-    for (const metric of Object.keys(METRICS)) {
-        await createChart(metric, data, participantId);
-    }
+    METRICS.forEach(m => createChart(m, data));
 }
 
-// Analyze metric for alerts
 function analyzeMetric(data, metric) {
-    const values = data
-        .filter(d => d[metric] != null)
-        .map(d => ({ date: new Date(d.date), value: d[metric] }))
-        .sort((a, b) => a.date - b.date);
+    const vals = data.filter(d => d[metric.key] != null).map(d => d[metric.key]);
+    if (vals.length < 14) return { status: 'normal', message: 'Insufficient data' };
 
-    if (values.length < 14) {
-        return { status: 'normal', message: 'Insufficient data' };
-    }
+    const ma       = calcMovingAverage(vals, 14);
+    const baseline = ma.slice(0, -1);
+    const mean     = baseline.reduce((a, b) => a + b, 0) / baseline.length;
+    const sd       = Math.sqrt(baseline.reduce((sq, n) => sq + (n - mean) ** 2, 0) / baseline.length);
+    const current  = vals[vals.length - 1];
 
-    const movingAvg = calculateMovingAverage(values.map(v => v.value), 14);
-    const baseline = movingAvg.slice(0, -1);
-    const mean = baseline.reduce((a, b) => a + b, 0) / baseline.length;
-    const std = Math.sqrt(baseline.reduce((sq, n) => sq + Math.pow(n - mean, 2), 0) / baseline.length);
-
-    const currentValue = values[values.length - 1].value;
-    const worsens = METRICS[metric].worsens;
-
-    if (worsens === 'increase' && currentValue > mean + 2 * std) {
+    if (metric.worsens === 'increase' && current > mean + 2 * sd) {
         return { status: 'warning', message: 'Above 2SD threshold' };
     }
-    if (worsens === 'decrease' && currentValue < mean - 2 * std) {
+    if (metric.worsens === 'decrease' && current < mean - 2 * sd) {
         return { status: 'warning', message: 'Below 2SD threshold' };
     }
-
     return { status: 'normal', message: 'Within normal range' };
 }
 
-// Calculate moving average
-function calculateMovingAverage(values, window) {
-    const result = [];
-    for (let i = 0; i < values.length; i++) {
-        const start = Math.max(0, i - window + 1);
-        const subset = values.slice(start, i + 1);
-        result.push(subset.reduce((a, b) => a + b, 0) / subset.length);
-    }
-    return result;
+function calcMovingAverage(values, window) {
+    return values.map((_, i) => {
+        const sl = values.slice(Math.max(0, i - window + 1), i + 1);
+        return sl.reduce((a, b) => a + b, 0) / sl.length;
+    });
 }
 
-// Create chart for a metric
-async function createChart(metric, data, participantId) {
-    const values = data
-        .filter(d => d[metric] != null)
-        .map(d => ({ x: new Date(d.date), y: d[metric] }))
+function createChart(metric, data) {
+    const vals = data
+        .filter(d => d[metric.key] != null)
+        .map(d => ({ x: new Date(d.date), y: d[metric.key] }))
         .sort((a, b) => a.x - b.x);
 
-    if (values.length === 0) {
-        document.getElementById(`chart-${metric}`).parentElement.innerHTML = 
-            '<p style="text-align: center; color: #718096; padding: 2rem;">No data available</p>';
+    const canvas = document.getElementById('chart-' + metric.key);
+    if (!vals.length) {
+        canvas.parentElement.innerHTML = '<div class="chart-empty">No data available for this period</div>';
         return;
     }
 
-    const movingAvg = calculateMovingAverage(values.map(v => v.y), 14);
-    const movingAvgData = values.map((v, i) => ({ x: v.x, y: movingAvg[i] }));
+    const rawY   = vals.map(v => v.y);
+    const ma     = calcMovingAverage(rawY, 14);
+    const maData = vals.map((v, i) => ({ x: v.x, y: ma[i] }));
 
-    const baseline = movingAvg.slice(0, -1);
-    const mean = baseline.reduce((a, b) => a + b, 0) / baseline.length;
-    const std = Math.sqrt(baseline.reduce((sq, n) => sq + Math.pow(n - mean, 2), 0) / baseline.length);
+    const mean = rawY.reduce((a, b) => a + b, 0) / rawY.length;
+    const sd   = Math.sqrt(rawY.reduce((a, v) => a + (v - mean) ** 2, 0) / (rawY.length - 1 || 1));
+    const threshold = metric.worsens === 'increase' ? mean + 2 * sd : mean - 2 * sd;
 
-    const worsens = METRICS[metric].worsens;
-    const alertThreshold = worsens === 'increase' ? mean + 2 * std : mean - 2 * std;
-
-    const { data: meds } = await supabaseClient
-        .from('medications')
-        .select('*')
-        .eq('participant_id', participantId)
-        .order('start_date');
-
-    const activeMeds = meds?.filter(m => activeMedications[m.id]) || [];
-    
-    // Generate all medication dose dates with full med info
-    const allMedicationDoses = [];
-    activeMeds.forEach(med => {
-        const doses = generateDoseDates(med);
-        doses.forEach(dose => {
-            allMedicationDoses.push({
-                date: dose,
-                medication: med.medication_name,
-                dose: med.dose,
-                medId: med.id,
-                color: 'rgba(251, 191, 36, 0.8)'
+    // Build medication annotation lines for active meds
+    const medAnnotations = [];
+    currentMedications.forEach(med => {
+        const start = new Date(med.start_date);
+        if (start >= vals[0].x && start <= vals[vals.length - 1].x) {
+            medAnnotations.push({
+                x: start,
+                label: med.medication_name + ' (' + (med.dose || '') + ')'
             });
-        });
+        }
     });
 
-    console.log(`[${metric}] Medication doses to display:`, allMedicationDoses);
-    console.log(`[${metric}] Active meds:`, activeMeds);
-
-    const ctx = document.getElementById(`chart-${metric}`).getContext('2d');
-    
-    if (chartInstances[metric]) {
-        chartInstances[metric].destroy();
-    }
-
-    // Custom plugin to draw medication lines
-    const medicationLinesPlugin = {
-        id: 'medicationLines',
+    // Medication lines plugin
+    const medPlugin = {
+        id: 'medLines_' + metric.key,
         afterDatasetsDraw: (chart) => {
-            const ctx = chart.ctx;
+            if (!medAnnotations.length) return;
+            const ctx    = chart.ctx;
             const xScale = chart.scales.x;
-            const yScale = chart.scales.y;
-            const chartArea = chart.chartArea;
-            
+            const area   = chart.chartArea;
+
             ctx.save();
-            
-            console.log(`[${metric}] Drawing medications, chartArea:`, chartArea);
-            
-            // Group medications by unique med_id to show each medication separately
-            const medicationGroups = {};
-            allMedicationDoses.forEach(dose => {
-                if (!medicationGroups[dose.medId]) {
-                    medicationGroups[dose.medId] = {
-                        name: dose.medication,
-                        doseAmount: dose.dose,
-                        dates: []
-                    };
-                }
-                medicationGroups[dose.medId].dates.push(dose.date);
-            });
-            
-            console.log(`[${metric}] Medication groups:`, medicationGroups);
-            
-            // Draw all medication lines
-            allMedicationDoses.forEach((dose) => {
-                const x = xScale.getPixelForValue(dose.date);
-                const yTop = chartArea.top;
-                const yBottom = chartArea.bottom;
-                
-                // Draw vertical line with 20% opacity
-                ctx.strokeStyle = 'rgba(251, 191, 36, 0.2)';
-                ctx.lineWidth = 3;
+            medAnnotations.forEach(ann => {
+                const x = xScale.getPixelForValue(ann.x);
+                if (x < area.left || x > area.right) return;
+
+                // Vertical line
+                ctx.strokeStyle = 'rgba(251, 191, 36, 0.25)';
+                ctx.lineWidth   = 2;
+                ctx.setLineDash([]);
                 ctx.beginPath();
-                ctx.moveTo(x, yTop);
-                ctx.lineTo(x, yBottom);
+                ctx.moveTo(x, area.top);
+                ctx.lineTo(x, area.bottom);
                 ctx.stroke();
-            });
-            
-            // Draw labels for each unique medication
-            const labelPositions = [];
-            
-            Object.values(medicationGroups).forEach((medGroup, groupIndex) => {
-                // Find the first date for this medication to position the label
-                const firstDate = medGroup.dates[0];
-                let x = xScale.getPixelForValue(firstDate);
-                
-                // Create label text with dose
-                const labelText = `${medGroup.name} (${medGroup.doseAmount})`;
-                
-                // Measure text width for proper background sizing
-                ctx.font = 'bold 10px sans-serif';
-                const textWidth = ctx.measureText(labelText).width;
-                const padding = 6;
-                const labelWidth = textWidth + padding * 2;
-                
-                // Check if label would be cut off on the right edge
-                const labelRight = x + labelWidth / 2;
-                if (labelRight > chartArea.right) {
-                    x = chartArea.right - labelWidth / 2;
-                }
-                
-                // Check if label would be cut off on the left edge
-                const labelLeft = x - labelWidth / 2;
-                if (labelLeft < chartArea.left) {
-                    x = chartArea.left + labelWidth / 2;
-                }
-                
-                // Find the highest Y value (data point) near this X position to avoid covering it
-                const nearbyPoints = values.filter(v => {
-                    const pointX = xScale.getPixelForValue(v.x);
-                    return Math.abs(pointX - x) < labelWidth / 2 + 10; // 10px buffer
-                });
-                
-                const highestPoint = nearbyPoints.length > 0 
-                    ? Math.min(...nearbyPoints.map(p => yScale.getPixelForValue(p.y)))
-                    : chartArea.top;
-                
-                // Determine which row this label should be on
-                let row = 0;
-                let overlaps = true;
-                
-                while (overlaps) {
-                    overlaps = false;
-                    const labelY = chartArea.top - 10 - (row * 22);
-                    const labelBottom = labelY + 18;
-                    
-                    // Check if this position overlaps with existing labels on this row
-                    for (const pos of labelPositions) {
-                        if (pos.row === row) {
-                            const horizontalOverlap = Math.abs(pos.x - x) < (labelWidth / 2 + pos.width / 2 + 5);
-                            if (horizontalOverlap) {
-                                overlaps = true;
-                                row++;
-                                break;
-                            }
-                        }
-                    }
-                    
-                    // Make sure label doesn't cover ANY part of the chart area
-                    if (!overlaps && labelBottom > chartArea.top) {
-                        overlaps = true;
-                        row++;
-                    }
-                }
-                
-                const labelY = chartArea.top - 10 - (row * 22);
-                
-                // Store this label's position
-                labelPositions.push({ x, row, width: labelWidth });
-                
-                // Draw background box
+
+                // Label
+                ctx.font      = 'bold 9px sans-serif';
                 ctx.fillStyle = 'rgba(251, 191, 36, 0.9)';
-                ctx.fillRect(x - textWidth/2 - padding, labelY, textWidth + padding * 2, 18);
-                
-                // Draw text
+                const tw = ctx.measureText(ann.label).width;
+                const lx = Math.min(Math.max(x - tw / 2, area.left), area.right - tw - 8);
+                ctx.fillRect(lx - 4, area.top - 16, tw + 8, 14);
                 ctx.fillStyle = '#78350f';
-                ctx.textAlign = 'center';
-                ctx.fillText(labelText, x, labelY + 13);
+                ctx.textAlign = 'left';
+                ctx.fillText(ann.label, lx, area.top - 5);
             });
-            
             ctx.restore();
         }
     };
 
-    chartInstances[metric] = new Chart(ctx, {
+    chartInstances[metric.key] = new Chart(canvas.getContext('2d'), {
         type: 'line',
         data: {
             datasets: [
                 {
-                    label: 'Actual',
-                    data: values,
-                    borderColor: '#667eea',
-                    backgroundColor: 'rgba(102, 126, 234, 0.1)',
-                    borderWidth: 2,
-                    pointRadius: 3,
-                    pointHoverRadius: 5
+                    label: 'Daily',
+                    data: vals,
+                    borderColor: metric.color,
+                    backgroundColor: metric.color + '15',
+                    borderWidth: 1.5,
+                    pointRadius: 2,
+                    pointHoverRadius: 5,
+                    pointBackgroundColor: metric.color,
+                    tension: 0.1,
+                    fill: true,
                 },
                 {
                     label: '14-Day MA',
-                    data: movingAvgData,
-                    borderColor: '#48bb78',
-                    borderWidth: 2,
-                    borderDash: [5, 5],
+                    data: maData,
+                    borderColor: metric.color,
+                    borderWidth: 2.5,
+                    borderDash: [6, 3],
                     pointRadius: 0,
-                    fill: false
+                    fill: false,
+                    tension: 0.3,
                 },
                 {
-                    label: 'Alert Threshold',
-                    data: values.map(v => ({ x: v.x, y: alertThreshold })),
-                    borderColor: 'rgba(229, 62, 62, 0.5)',
-                    borderWidth: 2,
-                    borderDash: [10, 5],
+                    label: (metric.worsens === 'increase' ? '+' : '−') + '2 SD',
+                    data: vals.map(v => ({ x: v.x, y: threshold })),
+                    borderColor: 'rgba(229, 62, 62, 0.4)',
+                    borderWidth: 1.5,
+                    borderDash: [8, 4],
                     pointRadius: 0,
-                    fill: false
-                }
+                    fill: false,
+                },
+                {
+                    label: 'Mean',
+                    data: vals.map(v => ({ x: v.x, y: mean })),
+                    borderColor: 'rgba(160, 174, 192, 0.4)',
+                    borderWidth: 1,
+                    borderDash: [4, 4],
+                    pointRadius: 0,
+                    fill: false,
+                },
             ]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            layout: {
-                padding: {
-                    top: 30  // Just enough padding for medication labels
-                }
-            },
+            interaction: { mode: 'index', intersect: false },
+            layout: { padding: { top: medAnnotations.length ? 24 : 4 } },
             scales: {
                 x: {
                     type: 'time',
-                    time: {
-                        unit: 'day',
-                        displayFormats: {
-                            day: 'MMM d'
-                        }
-                    },
-                    title: {
-                        display: true,
-                        text: 'Date'
-                    }
+                    time: { unit: 'day', displayFormats: { day: 'MMM d' } },
+                    ticks: { font: { size: 10 }, color: '#9ca3af', maxRotation: 0 },
+                    grid: { display: false },
                 },
                 y: {
-                    title: {
-                        display: true,
-                        text: `${METRICS[metric].label} (${METRICS[metric].unit})`
-                    }
+                    ticks: { font: { size: 10 }, color: '#9ca3af' },
+                    grid: { color: '#f3f4f6' },
                 }
             },
             plugins: {
                 legend: {
                     display: true,
                     position: 'bottom',
-                    labels: {
-                        padding: 10,
-                        boxWidth: 40
-                    }
+                    labels: { padding: 10, boxWidth: 28, font: { size: 11 }, usePointStyle: false }
                 },
                 tooltip: {
-                    mode: 'index',
-                    intersect: false,
+                    backgroundColor: '#fff',
+                    titleColor: '#111',
+                    bodyColor: '#374151',
+                    borderColor: '#e2e8f0',
+                    borderWidth: 1,
+                    cornerRadius: 8,
+                    padding: 10,
+                    titleFont: { size: 12, weight: '600' },
+                    bodyFont: { size: 12 },
                     callbacks: {
-                        footer: function(tooltipItems) {
-                            const date = new Date(tooltipItems[0].parsed.x);
-                            const activeOnDate = activeMeds.filter(m => {
-                                const start = new Date(m.start_date);
-                                const end = m.end_date ? new Date(m.end_date) : new Date();
-                                return date >= start && date <= end;
+                        label: ctx => {
+                            return ctx.dataset.label + ': ' +
+                                (ctx.parsed.y != null ? ctx.parsed.y.toFixed(3) : 'N/A');
+                        },
+                        footer: items => {
+                            const date = new Date(items[0].parsed.x);
+                            const active = currentMedications.filter(m => {
+                                const s = new Date(m.start_date);
+                                const e = m.end_date ? new Date(m.end_date) : new Date();
+                                return date >= s && date <= e;
                             });
-                            
-                            if (activeOnDate.length > 0) {
-                                return '\nActive Meds: ' + activeOnDate.map(m => m.medication_name).join(', ');
-                            }
-                            return '';
+                            return active.length
+                                ? '\nActive Meds: ' + active.map(m => m.medication_name).join(', ')
+                                : '';
                         }
                     }
                 }
             }
         },
-        plugins: [medicationLinesPlugin]
+        plugins: [medPlugin]
     });
 }
 
-// Generate dose dates based on medication frequency
-function generateDoseDates(medication) {
-    const start = new Date(medication.start_date);
-    const end = medication.end_date ? new Date(medication.end_date) : new Date();
-    const doses = [];
-    
-    let intervalDays;
-    switch(medication.frequency) {
-        case 'daily':
-            intervalDays = 1;
-            break;
-        case 'weekly':
-            intervalDays = 7;
-            break;
-        case 'biweekly':
-            intervalDays = 14;
-            break;
-        case 'monthly':
-            intervalDays = 30;
-            break;
-        case 'asneeded':
-            // For as-needed, just show start and end
-            doses.push(start);
-            if (medication.end_date) doses.push(end);
-            return doses;
-        default:
-            intervalDays = 1;
+// ═════════════════════════════════════════════════════
+// SIDE EFFECTS
+// ═════════════════════════════════════════════════════
+
+function renderSideEffects() {
+    const el = document.getElementById('sideEffectsContent');
+    document.getElementById('seCount').textContent = currentSideEffects.length;
+
+    if (!currentSideEffects.length) {
+        el.innerHTML = '<div class="empty-state">No reports filed</div>';
+        return;
     }
-    
-    let currentDate = new Date(start);
-    while (currentDate <= end) {
-        doses.push(new Date(currentDate));
-        currentDate.setDate(currentDate.getDate() + intervalDays);
-    }
-    
-    return doses;
+
+    el.innerHTML = `
+        <table class="se-table">
+            <thead><tr><th>Date</th><th>Report</th></tr></thead>
+            <tbody>${currentSideEffects.map(s => `
+                <tr>
+                    <td class="se-date">${fmtDate(s.reported_at)}</td>
+                    <td>${escHtml(s.message || '')}</td>
+                </tr>`).join('')}
+            </tbody>
+        </table>`;
 }
 
-// Load medications for a participant
-async function loadMedications(participantId) {
-    const { data, error } = await supabaseClient
-        .from('medications')
-        .select('*')
-        .eq('participant_id', participantId)
-        .order('start_date', { ascending: false });
+// ═════════════════════════════════════════════════════
+// MEDICATIONS
+// ═════════════════════════════════════════════════════
 
-    if (error) {
-        console.error('Error loading medications:', error);
+function renderMedications() {
+    const el = document.getElementById('medicationsContent');
+    document.getElementById('medCount').textContent = currentMedications.length;
+
+    if (!currentMedications.length) {
+        el.innerHTML = '<div class="empty-state">No medications recorded</div>';
         return;
     }
 
-    if (!data || data.length === 0) {
-        document.getElementById('medicationsList').innerHTML = 
-            '<div class="empty-state"><p>No medications recorded</p></div>';
-        return;
-    }
-
-    // Initialize all medications as active
-    data.forEach(med => {
-        if (activeMedications[med.id] === undefined) {
-            activeMedications[med.id] = true;
-        }
-    });
-
-    const frequencyLabels = {
-        daily: 'Daily',
-        weekly: 'Weekly',
-        biweekly: 'Every 2 Weeks',
-        monthly: 'Monthly',
-        asneeded: 'As Needed'
+    const freqLabels = {
+        daily: 'Daily', weekly: 'Weekly', biweekly: 'Every 2 Weeks',
+        monthly: 'Monthly', asneeded: 'As Needed'
     };
 
-    const html = data.map(med => `
-        <div class="medication-item">
-            <div class="medication-info">
-                <h4>${med.medication_name}</h4>
-                <div class="details">
-                    Dose: ${med.dose} | 
-                    Frequency: ${frequencyLabels[med.frequency] || med.frequency || 'Not specified'} | 
-                    Started: ${new Date(med.start_date).toLocaleDateString()} 
-                    ${med.end_date ? `| Ended: ${new Date(med.end_date).toLocaleDateString()}` : '| Ongoing'}
-                </div>
-            </div>
-            <div class="medication-controls">
-                <div class="medication-toggle">
-                    <span class="toggle-label">Show</span>
-                    <div class="toggle-switch ${activeMedications[med.id] ? 'active' : ''}" 
-                         onclick="toggleMedication(${med.id})"></div>
-                </div>
-                <button class="btn-delete" onclick="deleteMedication(${med.id})">Delete</button>
-            </div>
-        </div>
-    `).join('');
-
-    document.getElementById('medicationsList').innerHTML = html;
+    el.innerHTML = `
+        <table class="med-table">
+            <thead><tr><th>Medication</th><th>Dose</th><th>Frequency</th><th>Started</th><th>Status</th></tr></thead>
+            <tbody>${currentMedications.map(m => {
+                const isActive = !m.end_date;
+                return `
+                <tr>
+                    <td class="med-name">${escHtml(m.medication_name || '')}</td>
+                    <td>${escHtml(m.dose || '—')}</td>
+                    <td>${freqLabels[m.frequency] || m.frequency || '—'}</td>
+                    <td style="color:#6b7280">${fmtDate(m.start_date)}</td>
+                    <td>
+                        ${isActive
+                            ? '<span class="med-status active">Active</span>'
+                            : '<span class="med-status ended">Ended ' + fmtDate(m.end_date) + '</span>'}
+                    </td>
+                </tr>`;
+            }).join('')}
+            </tbody>
+        </table>`;
 }
 
-// Toggle medication visibility on charts
-async function toggleMedication(medId) {
-    activeMedications[medId] = !activeMedications[medId];
-    
-    // Update toggle UI
-    const toggles = document.querySelectorAll('.toggle-switch');
-    toggles.forEach(toggle => {
-        const medIdFromOnclick = toggle.getAttribute('onclick').match(/\d+/)[0];
-        if (parseInt(medIdFromOnclick) === medId) {
-            if (activeMedications[medId]) {
-                toggle.classList.add('active');
-            } else {
-                toggle.classList.remove('active');
-            }
-        }
+// ═════════════════════════════════════════════════════
+// CSV EXPORT
+// ═════════════════════════════════════════════════════
+
+function exportParticipantCSV() {
+    if (!currentParticipant) return;
+
+    let csv = 'Date,Walking Speed (m/s),Step Length (m),Asymmetry (%),Double Support (%),Steadiness\n';
+    currentMetrics.forEach(m => {
+        csv += `${m.date},${m.walking_speed ?? ''},${m.walking_step_length ?? ''},${m.walking_asymmetry ?? ''},${m.double_support_time ?? ''},${m.walking_steadiness ?? ''}\n`;
     });
-    
-    // Reload all charts to show/hide medication markers
-    await loadParticipantData(currentParticipant);
+
+    csv += '\n\nSide Effects\nDate,Message\n';
+    currentSideEffects.forEach(s => {
+        csv += `${fmtDate(s.reported_at)},"${(s.message || '').replace(/"/g, '""')}"\n`;
+    });
+
+    csv += '\n\nMedications\nMedication,Dose,Frequency,Start Date,End Date\n';
+    currentMedications.forEach(m => {
+        csv += `"${(m.medication_name || '').replace(/"/g, '""')}","${m.dose || ''}","${m.frequency || ''}",${m.start_date || ''},${m.end_date || ''}\n`;
+    });
+
+    downloadCSV(csv, `stepforward_${currentParticipant.id}_${todayStr()}.csv`);
 }
 
-// Delete medication
-async function deleteMedication(medId) {
-    if (!confirm('Are you sure you want to delete this medication?')) {
-        return;
+async function exportAllCSV() {
+    if (!participantsList.length) return;
+
+    const btn = document.querySelector('.toolbar-actions .btn-primary');
+    const origText = btn.innerHTML;
+    btn.innerHTML = '<span class="btn-spinner" style="display:inline-block"></span> Exporting…';
+    btn.disabled  = true;
+
+    try {
+        const ids = participantsList.map(p => p.id);
+        const { data: allM } = await sb.from('gait_metrics')
+            .select('*')
+            .in('participant_id', ids)
+            .order('date', { ascending: true });
+
+        let csv = 'Participant ID,Pharmacy,Date,Walking Speed,Step Length,Asymmetry,Double Support,Steadiness\n';
+        participantsList.forEach(p => {
+            (allM || []).filter(m => m.participant_id === p.id).forEach(m => {
+                csv += `${p.id},"${p.pharmacy_name}",${m.date},${m.walking_speed ?? ''},${m.walking_step_length ?? ''},${m.walking_asymmetry ?? ''},${m.double_support_time ?? ''},${m.walking_steadiness ?? ''}\n`;
+            });
+        });
+
+        downloadCSV(csv, `stepforward_all_participants_${todayStr()}.csv`);
+    } catch (err) {
+        console.error('Export failed:', err);
+    } finally {
+        btn.innerHTML = origText;
+        btn.disabled  = false;
     }
-    
-    console.log('Attempting to delete medication ID:', medId);
-    
-    const { data, error } = await supabaseClient
-        .from('medications')
-        .delete()
-        .eq('id', medId);
-    
-    console.log('Delete response:', { data, error });
-    
-    if (error) {
-        alert('Error deleting medication: ' + error.message);
-        console.error('Medication delete error:', error);
-        return;
-    }
-    
-    // Remove from active medications tracking
-    delete activeMedications[medId];
-    
-    console.log('Medication deleted successfully, reloading...');
-    
-    // Reload medications list and charts
-    await loadMedications(currentParticipant);
-    await loadParticipantData(currentParticipant);
 }
 
-// Open medication modal
-function openMedicationModal() {
-    document.getElementById('medicationModal').classList.add('active');
+function downloadCSV(csv, filename) {
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const a    = document.createElement('a');
+    a.href     = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
 }
 
-// Close medication modal
-function closeMedicationModal() {
-    document.getElementById('medicationModal').classList.remove('active');
-    document.getElementById('medicationForm').reset();
+// ═════════════════════════════════════════════════════
+// UTILITIES
+// ═════════════════════════════════════════════════════
+
+function fmtDate(d) {
+    if (!d) return '—';
+    return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-// Handle medication form submission
-document.getElementById('medicationForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-
-    const { error } = await supabaseClient
-        .from('medications')
-        .insert([{
-            participant_id: currentParticipant,
-            medication_name: document.getElementById('medName').value,
-            dose: document.getElementById('medDose').value,
-            frequency: document.getElementById('medFrequency').value,
-            start_date: document.getElementById('medStartDate').value,
-            end_date: document.getElementById('medEndDate').value || null
-        }]);
-
-    if (error) {
-        alert('Error adding medication: ' + error.message);
-        console.error('Medication insert error:', error);
-        return;
-    }
-
-    closeMedicationModal();
-    await loadMedications(currentParticipant);
-    await loadParticipantData(currentParticipant);
-});
-
-// Test data insertion function
-async function showTestData() {
-    if (!confirm('This will add 3 test participants and 30 days of sample data. Continue?')) return;
-    
-    console.log('Adding test data...');
-    
-    // Add test participants
-    const participants = ['P001', 'P002', 'P003'];
-    for (const pid of participants) {
-        const { error } = await supabaseClient
-            .from('participants')
-            .insert([{ id: pid }]);
-        if (error) console.error('Error adding participant:', error);
-    }
-    
-    // Add sample gait metrics
-    const today = new Date();
-    for (let i = 0; i < 30; i++) {
-        const date = new Date(today);
-        date.setDate(date.getDate() - (29 - i));
-        const dateStr = date.toISOString().split('T')[0];
-        
-        for (const pid of participants) {
-            const { error } = await supabaseClient
-                .from('gait_metrics')
-                .insert([{
-                    participant_id: pid,
-                    date: dateStr,
-                    double_support_time: 0.3 + Math.random() * 0.1,
-                    walking_asymmetry: 2 + Math.random() * 3,
-                    walking_speed: 1.2 + Math.random() * 0.3,
-                    walking_step_length: 0.65 + Math.random() * 0.15,
-                    walking_steadiness: 85 + Math.random() * 10
-                }]);
-            if (error) console.error('Error adding metrics:', error);
-        }
-    }
-    
-    alert('Test data added! Refreshing...');
-    location.reload();
+function todayStr() {
+    return new Date().toISOString().split('T')[0];
 }
 
-// Initialize on page load
-loadParticipants();
+function escHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
+function escAttr(s) {
+    return s.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+function getInitials(name) {
+    if (!name) return '?';
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    return name.substring(0, 2).toUpperCase();
+}
+
+// ═════════════════════════════════════════════════════
+// INIT — Check for existing session
+// ═════════════════════════════════════════════════════
+
+(async () => {
+    const { data: { session: existing } } = await sb.auth.getSession();
+    if (existing) {
+        session = existing;
+        showLoadingOverlay();
+        await loadDashboard();
+    }
+})();
